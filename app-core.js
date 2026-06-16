@@ -3,6 +3,7 @@
 // SYNC STATUS INDICATOR, RETRY-ON-401, SMART AUTO-BACKUP
 // PATCH: Fixed 401 on userinfo, 403 on upload with fallback to new file creation
 // PATCH: Better popup blocker handling and user guidance
+// PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
 (function() {
     'use strict';
 
@@ -1366,6 +1367,9 @@
     const PRODUCT_TYPES = ['Product', 'Service'];
     const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
 
+    // Product status options
+    const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
+
     function invoiceItemRow(item, idx, products) {
         const selectedProductId = item ? item.productId : (products[0]?.id || '');
         const productOptions = products.length ? products.map(p => `<option value="${p.id}" ${p.id == selectedProductId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.type || 'Product'})</option>`).join('') : '<option disabled>No products found</option>';
@@ -2204,26 +2208,66 @@
         } catch(err) { showToast('Error opening supplier form', 'error'); }
     }
 
-    // ---------- Products ----------
+    // ---------- Products (Enhanced with full generator details, stock, supplier) ----------
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
+            const suppliers = await dbGetAll('suppliers');
+            const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
             let searchTerm = '';
             let filteredProducts = [...allProducts];
             const renderTable = () => {
                 let html = `<div class="page-header"><h1 class="page-title">Products & Services</h1><button class="btn btn-primary" id="addProductBtn">+ Add Product</button></div>
-                <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type product name..."></div>
+                <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
-                <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Type</th><th>Name</th><th>HSN/SAC</th><th>Cost Price</th><th>Selling Price</th><th>GST%</th><th>Actions</th></tr></thead><tbody>`;
-                filteredProducts.forEach(p => { html += `<tr><td>${escapeHtml(p.type||'Product')}</td><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.hsnSacCode)}</td><td>${formatCurrency(p.costPrice||0)}</td><td>${formatCurrency(p.sellingPrice||0)}</td><td>${p.gstRate}%</td><td><button class="btn btn-outline btn-sm edit-product" data-id="${p.id}">Edit</button> <button class="btn btn-danger btn-sm delete-product" data-id="${p.id}">Del</button></td></tr>`; });
-                if (!filteredProducts.length) html += `<tr><td colspan="7" class="empty-state">No products found.</td></tr>`;
+                <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
+                    <th>SKU</th><th>Name</th><th>Brand</th><th>Model</th><th>Category</th><th>Capacity (KVA)</th><th>Sell Price</th><th>Stock</th><th>Status</th><th>Actions</th>
+                </tr></thead><tbody>`;
+                filteredProducts.forEach(p => {
+                    // Compute status if not set
+                    let status = p.status || 'In Stock';
+                    if (status !== 'Discontinued') {
+                        if (p.stockQuantity <= 0) status = 'Out of Stock';
+                        else if (p.stockQuantity <= (p.reorderLevel || 0)) status = 'Low Stock';
+                        else status = 'In Stock';
+                    }
+                    const statusClass = status === 'In Stock' ? 'status-in-stock' :
+                                       status === 'Low Stock' ? 'status-low-stock' :
+                                       status === 'Out of Stock' ? 'status-out-of-stock' : 'status-discontinued';
+                    html += `<tr>
+                        <td>${escapeHtml(p.sku || '')}</td>
+                        <td>${escapeHtml(p.name)}</td>
+                        <td>${escapeHtml(p.brand || '')}</td>
+                        <td>${escapeHtml(p.modelNumber || '')}</td>
+                        <td>${escapeHtml(p.category || '')}</td>
+                        <td>${p.capacityKva || ''}</td>
+                        <td>${formatCurrency(p.sellingPrice || 0)}</td>
+                        <td>${p.stockQuantity || 0}</td>
+                        <td><span class="status-badge ${statusClass}">${status}</span></td>
+                        <td>
+                            <button class="btn btn-outline btn-sm edit-product" data-id="${p.id}">Edit</button>
+                            <button class="btn btn-danger btn-sm delete-product" data-id="${p.id}">Del</button>
+                        </td>
+                    </tr>`;
+                });
+                if (!filteredProducts.length) html += `<tr><td colspan="10" class="empty-state">No products found.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addProductBtn')?.addEventListener('click', () => showProductModal());
                 document.querySelectorAll('.edit-product').forEach(b => b.addEventListener('click', async () => { const p = await dbGetById('products', Number(b.dataset.id)); showProductModal(p); }));
                 document.querySelectorAll('.delete-product').forEach(b => b.addEventListener('click', async () => { await dbDelete('products', Number(b.dataset.id)); await renderProducts(); }));
             };
-            const apply = () => { searchTerm = document.getElementById('prodSearch').value.trim().toLowerCase(); filteredProducts = allProducts.filter(p => p.name.toLowerCase().includes(searchTerm)); renderTable(); };
+            const apply = () => {
+                searchTerm = document.getElementById('prodSearch').value.trim().toLowerCase();
+                filteredProducts = allProducts.filter(p => 
+                    (p.name && p.name.toLowerCase().includes(searchTerm)) ||
+                    (p.sku && p.sku.toLowerCase().includes(searchTerm)) ||
+                    (p.brand && p.brand.toLowerCase().includes(searchTerm)) ||
+                    (p.modelNumber && p.modelNumber.toLowerCase().includes(searchTerm)) ||
+                    (p.category && p.category.toLowerCase().includes(searchTerm))
+                );
+                renderTable();
+            };
             const clear = () => { searchTerm = ''; filteredProducts = [...allProducts]; renderTable(); };
             filteredProducts = [...allProducts];
             renderTable();
@@ -2234,14 +2278,75 @@
     async function showProductModal(prodData = null) {
         try {
             const isEdit = !!prodData;
+            const suppliers = await dbGetAll('suppliers');
+            // Populate default status
+            let defaultStatus = 'In Stock';
+            if (isEdit && prodData.status) defaultStatus = prodData.status;
+            else {
+                // Compute default based on stock if new
+                const stock = prodData?.stockQuantity || 0;
+                const reorder = prodData?.reorderLevel || 0;
+                if (stock <= 0) defaultStatus = 'Out of Stock';
+                else if (stock <= reorder) defaultStatus = 'Low Stock';
+                else defaultStatus = 'In Stock';
+            }
+
             const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Product/Service</h3>
-                <form id="prodForm"><div class="form-grid"><div class="form-group"><label>Type</label><select id="prodType">${PRODUCT_TYPES.map(t => `<option value="${t}" ${isEdit && prodData.type === t ? 'selected' : (t === 'Product' && !isEdit ? 'selected' : '')}>${t}</option>`).join('')}</select></div>
-                <div class="form-group"><label>Name *</label><input id="prodName" value="${isEdit ? escapeHtml(prodData.name) : ''}" required></div>
-                <div class="form-group"><label>HSN/SAC Code</label><input id="prodHsn" value="${isEdit ? escapeHtml(prodData.hsnSacCode) : ''}"></div>
-                <div class="form-group"><label>Cost Price (₹)</label><input type="number" step="0.01" id="prodCostPrice" value="${isEdit ? (prodData.costPrice || 0) : 0}"></div>
-                <div class="form-group"><label>Selling Price (₹)</label><input type="number" step="0.01" id="prodSellingPrice" value="${isEdit ? (prodData.sellingPrice || 0) : 0}"></div>
-                <div class="form-group"><label>GST %</label><input type="number" step="0.1" id="prodGst" value="${isEdit ? prodData.gstRate : 18}"></div>
-                </div><button type="submit" class="btn btn-primary">Save</button></form></div></div>`;
+                <form id="prodForm">
+                    <div class="form-grid">
+                        <!-- Basic Info -->
+                        <div class="form-group"><label>Type</label><select id="prodType">${PRODUCT_TYPES.map(t => `<option value="${t}" ${isEdit && prodData.type === t ? 'selected' : (t === 'Product' && !isEdit ? 'selected' : '')}>${t}</option>`).join('')}</select></div>
+                        <div class="form-group"><label>SKU (Item ID)</label><input id="prodSku" value="${isEdit ? escapeHtml(prodData.sku || '') : ''}" placeholder="e.g. GEN-001"></div>
+                        <div class="form-group"><label>Generator Name *</label><input id="prodName" value="${isEdit ? escapeHtml(prodData.name) : ''}" required></div>
+                        <div class="form-group"><label>Brand</label><input id="prodBrand" value="${isEdit ? escapeHtml(prodData.brand || '') : ''}"></div>
+                        <div class="form-group"><label>Model Number</label><input id="prodModel" value="${isEdit ? escapeHtml(prodData.modelNumber || '') : ''}"></div>
+                        <div class="form-group"><label>Category</label><input id="prodCategory" value="${isEdit ? escapeHtml(prodData.category || '') : ''}"></div>
+                        <!-- Generator Specs -->
+                        <div class="form-group"><label>Fuel Type</label>
+                            <select id="prodFuelType">
+                                <option value="">Select</option>
+                                <option value="Diesel" ${isEdit && prodData.fuelType === 'Diesel' ? 'selected' : ''}>Diesel</option>
+                                <option value="Petrol" ${isEdit && prodData.fuelType === 'Petrol' ? 'selected' : ''}>Petrol</option>
+                                <option value="Gas" ${isEdit && prodData.fuelType === 'Gas' ? 'selected' : ''}>Gas</option>
+                                <option value="Electric" ${isEdit && prodData.fuelType === 'Electric' ? 'selected' : ''}>Electric</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Capacity (KVA)</label><input type="number" step="0.01" id="prodCapacity" value="${isEdit ? prodData.capacityKva || '' : ''}"></div>
+                        <div class="form-group"><label>Output Voltage</label><input id="prodVoltage" value="${isEdit ? escapeHtml(prodData.outputVoltage || '') : ''}"></div>
+                        <div class="form-group"><label>Phase</label>
+                            <select id="prodPhase">
+                                <option value="">Select</option>
+                                <option value="Single" ${isEdit && prodData.phase === 'Single' ? 'selected' : ''}>Single</option>
+                                <option value="Three" ${isEdit && prodData.phase === 'Three' ? 'selected' : ''}>Three</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Frequency (Hz)</label><input id="prodFrequency" value="${isEdit ? escapeHtml(prodData.frequency || '') : ''}"></div>
+                        <div class="form-group"><label>Engine Model</label><input id="prodEngine" value="${isEdit ? escapeHtml(prodData.engineModel || '') : ''}"></div>
+                        <div class="form-group"><label>Alternator Model</label><input id="prodAlternator" value="${isEdit ? escapeHtml(prodData.alternatorModel || '') : ''}"></div>
+                        <div class="form-group"><label>Serial Number</label><input id="prodSerial" value="${isEdit ? escapeHtml(prodData.serialNumber || '') : ''}"></div>
+                        <div class="form-group"><label>Manufacturing Year</label><input type="number" id="prodYear" value="${isEdit ? prodData.manufacturingYear || '' : ''}"></div>
+                        <div class="form-group"><label>Warranty Period (months)</label><input type="number" id="prodWarranty" value="${isEdit ? prodData.warrantyPeriod || '' : ''}"></div>
+                        <!-- Pricing & GST -->
+                        <div class="form-group"><label>Purchase Price (₹)</label><input type="number" step="0.01" id="prodCostPrice" value="${isEdit ? (prodData.purchasePrice || 0) : 0}"></div>
+                        <div class="form-group"><label>Selling Price (₹)</label><input type="number" step="0.01" id="prodSellingPrice" value="${isEdit ? (prodData.sellingPrice || 0) : 0}"></div>
+                        <div class="form-group"><label>GST %</label><input type="number" step="0.1" id="prodGst" value="${isEdit ? prodData.gstRate : 18}"></div>
+                        <!-- Supplier & Stock -->
+                        <div class="form-group"><label>Supplier</label>
+                            <select id="prodSupplier">
+                                <option value="">Select Supplier</option>
+                                ${suppliers.map(s => `<option value="${s.id}" ${isEdit && prodData.supplierId == s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Stock Quantity</label><input type="number" id="prodStock" value="${isEdit ? (prodData.stockQuantity || 0) : 0}"></div>
+                        <div class="form-group"><label>Reorder Level</label><input type="number" id="prodReorder" value="${isEdit ? (prodData.reorderLevel || 0) : 0}"></div>
+                        <div class="form-group"><label>Status</label>
+                            <select id="prodStatus">
+                                ${PRODUCT_STATUSES.map(s => `<option value="${s}" ${s === defaultStatus ? 'selected' : ''}>${s}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="margin-top:16px;">${isEdit ? 'Update' : 'Save'} Product</button>
+                </form></div></div>`;
             document.getElementById('modalContainer').innerHTML = modalHtml;
             const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
             document.getElementById('closeProdModal').addEventListener('click', close);
@@ -2249,10 +2354,34 @@
             document.getElementById('prodForm').addEventListener('submit', async e => {
                 e.preventDefault();
                 try {
-                    const obj = { type: document.getElementById('prodType').value, name: document.getElementById('prodName').value, hsnSacCode: document.getElementById('prodHsn').value, costPrice: parseFloat(document.getElementById('prodCostPrice').value)||0, sellingPrice: parseFloat(document.getElementById('prodSellingPrice').value)||0, gstRate: parseFloat(document.getElementById('prodGst').value)||18 };
+                    const obj = {
+                        type: document.getElementById('prodType').value,
+                        sku: document.getElementById('prodSku').value,
+                        name: document.getElementById('prodName').value,
+                        brand: document.getElementById('prodBrand').value,
+                        modelNumber: document.getElementById('prodModel').value,
+                        category: document.getElementById('prodCategory').value,
+                        fuelType: document.getElementById('prodFuelType').value,
+                        capacityKva: parseFloat(document.getElementById('prodCapacity').value) || 0,
+                        outputVoltage: document.getElementById('prodVoltage').value,
+                        phase: document.getElementById('prodPhase').value,
+                        frequency: document.getElementById('prodFrequency').value,
+                        engineModel: document.getElementById('prodEngine').value,
+                        alternatorModel: document.getElementById('prodAlternator').value,
+                        serialNumber: document.getElementById('prodSerial').value,
+                        manufacturingYear: parseInt(document.getElementById('prodYear').value) || null,
+                        warrantyPeriod: parseInt(document.getElementById('prodWarranty').value) || null,
+                        purchasePrice: parseFloat(document.getElementById('prodCostPrice').value) || 0,
+                        sellingPrice: parseFloat(document.getElementById('prodSellingPrice').value) || 0,
+                        gstRate: parseFloat(document.getElementById('prodGst').value) || 18,
+                        supplierId: document.getElementById('prodSupplier').value ? parseInt(document.getElementById('prodSupplier').value) : null,
+                        stockQuantity: parseInt(document.getElementById('prodStock').value) || 0,
+                        reorderLevel: parseInt(document.getElementById('prodReorder').value) || 0,
+                        status: document.getElementById('prodStatus').value
+                    };
                     if (isEdit) { obj.id = prodData.id; await dbPut('products', obj); } else await dbAdd('products', obj);
                     close(); await renderProducts(); showToast('Product saved', 'success');
-                } catch(err) { showToast('Error saving product', 'error'); }
+                } catch(err) { showToast('Error saving product', 'error'); console.error(err); }
             });
         } catch(err) { showToast('Error opening product form', 'error'); }
     }
@@ -2626,7 +2755,7 @@
                 if (inv.items) {
                     for (const item of inv.items) {
                         const prod = products.find(p => p.id == item.productId);
-                        const costPerUnit = prod?.costPrice || 0;
+                        const costPerUnit = prod?.purchasePrice || 0; // use purchasePrice as cost
                         monthCOGS += (item.qty * costPerUnit);
                     }
                 }
@@ -2725,7 +2854,7 @@
         const profitDetails = [];
         for (const [pid, sales] of Object.entries(salesByProduct)) {
             const prod = products.find(p => p.id == pid);
-            const costPerUnit = prod?.costPrice || 0;
+            const costPerUnit = prod?.purchasePrice || 0;
             const cogs = sales.qty * costPerUnit;
             const profit = sales.revenue - cogs;
             const margin = sales.revenue ? (profit / sales.revenue) * 100 : 0;
