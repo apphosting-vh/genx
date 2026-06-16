@@ -1,40 +1,51 @@
-// sw.js - GenFin Offline Service Worker
-const CACHE_VERSION = 'v1'; // Increment when you change assets
+// sw.js - GenFin Production Offline Service Worker
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `genfin-${CACHE_VERSION}`;
 
-// List of assets to cache on install
-const ASSETS = [
+// Assets to cache on install (always from the same origin)
+const STATIC_ASSETS = [
     './',
     './index.html',
     './app-core.js',
-    // External libraries (CDN)
-    'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
-    'https://accounts.google.com/gsi/client',
-    'https://apis.google.com/js/api.js',
-    // Add favicon or manifest if any
-    // './favicon.ico'
+    './manifest.json'
 ];
 
-// Install event: cache all assets
+// External CDN assets (cached with crossOrigin)
+const EXTERNAL_ASSETS = [
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
+];
+
+// URLs that should never be cached (always network)
+const NEVER_CACHE = [
+    './app-version.json',
+    // Google auth scripts – dynamic and must come from network
+    'https://accounts.google.com/gsi/client',
+    'https://apis.google.com/js/api.js'
+];
+
+// Install event – cache core assets
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                console.log('Service Worker: Caching assets');
-                return cache.addAll(ASSETS);
+                // Cache static and external assets
+                return Promise.all([
+                    cache.addAll(STATIC_ASSETS),
+                    cache.addAll(EXTERNAL_ASSETS)
+                ]);
             })
             .then(() => self.skipWaiting()) // Activate immediately
     );
 });
 
-// Activate event: clean old caches and claim clients
+// Activate – clean old caches and take control
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys().then(cacheNames => {
             return Promise.all(
                 cacheNames.map(cache => {
                     if (cache !== CACHE_NAME) {
-                        console.log('Service Worker: Deleting old cache:', cache);
+                        console.log('Deleting old cache:', cache);
                         return caches.delete(cache);
                     }
                 })
@@ -44,50 +55,73 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Fetch event: network-first, fallback to cache
+// Fetch – network‑first for NEVER_CACHE, stale‑while‑revalidate for others
 self.addEventListener('fetch', event => {
     const request = event.request;
     const url = new URL(request.url);
 
-    // Skip cross-origin requests except for our CDN assets (already cached)
-    // For external resources, we try network first, but if offline, we may fallback to cache.
-    // For simplicity, we'll try network first for all, but for same-origin and known CDN, we also have cache.
+    // 1) Never cache: go straight to network
+    if (NEVER_CACHE.some(pattern => url.href.includes(pattern) || url.pathname.includes(pattern))) {
+        event.respondWith(fetch(request));
+        return;
+    }
 
+    // 2) For navigation (HTML pages) – serve from cache, fallback to network, then to offline fallback
+    if (request.mode === 'navigate') {
+        event.respondWith(
+            caches.match(request)
+                .then(cached => {
+                    if (cached) return cached;
+                    // Not in cache – try network
+                    return fetch(request)
+                        .then(response => {
+                            // Cache the new response for future
+                            const clone = response.clone();
+                            caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
+                            return response;
+                        })
+                        .catch(() => {
+                            // Offline – serve a simple fallback
+                            return caches.match('./index.html') || new Response(
+                                '<html><body><h1>Offline</h1><p>Please connect to the internet.</p></body></html>',
+                                { headers: { 'Content-Type': 'text/html' } }
+                            );
+                        });
+                })
+        );
+        return;
+    }
+
+    // 3) For static assets (JS, CSS, images, etc.) – use stale‑while‑revalidate
+    //    (serve from cache, update in background)
     event.respondWith(
-        fetch(request)
-            .then(response => {
-                // If response is valid, clone it and store in cache for future offline use
-                const responseClone = response.clone();
-                caches.open(CACHE_NAME).then(cache => {
-                    // Cache only same-origin or CDN resources (avoid caching external dynamic content)
-                    if (url.origin === location.origin || 
-                        url.hostname === 'cdn.jsdelivr.net' || 
-                        url.hostname === 'accounts.google.com' || 
-                        url.hostname === 'apis.google.com') {
-                        cache.put(request, responseClone);
-                    }
-                });
-                return response;
-            })
-            .catch(() => {
-                // Network failed: serve from cache
-                return caches.match(request)
-                    .then(cachedResponse => {
-                        if (cachedResponse) {
-                            return cachedResponse;
+        caches.match(request)
+            .then(cached => {
+                // Update the cache in the background (don't await)
+                const fetchPromise = fetch(request)
+                    .then(response => {
+                        if (response && response.status === 200) {
+                            const clone = response.clone();
+                            caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
                         }
-                        // If not in cache, return a fallback page (index.html) for navigation requests
-                        if (request.mode === 'navigate') {
-                            return caches.match('./index.html');
-                        }
-                        // Else return a simple error response
-                        return new Response('Offline - Resource not available', { status: 404 });
-                    });
+                        return response;
+                    })
+                    .catch(() => {}); // ignore errors
+
+                // Return cached version immediately, or wait for network if not cached
+                if (cached) {
+                    // Update cache in background
+                    fetchPromise;
+                    return cached;
+                } else {
+                    // Not cached – wait for network
+                    return fetchPromise;
+                }
             })
     );
 });
 
-// Optional: Listen for skipWaiting messages from clients to force update
+// Message listener to skip waiting
 self.addEventListener('message', event => {
     if (event.data === 'skipWaiting') {
         self.skipWaiting();

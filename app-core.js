@@ -4,7 +4,7 @@
 // sync status indicator, retry-on-401, smart auto-backup, service & warranty, product inventory
 // + Reset & Delete Data, Daily Backup Status, Auto-backup default 4h enabled, Inventory Type column,
 // GST 0% fix, View modal table header fix, File System Access API for local disk sync
-// + Service Worker registration for offline caching
+// + Production-grade service worker with PWA support
 
 (function() {
     'use strict';
@@ -31,24 +31,41 @@
     // Global flag to suppress auto-backup during restore
     let _suppressAutoBackup = false;
 
-    // ---------- Service Worker Registration ----------
+    // ---------- Service Worker Registration (production-grade) ----------
     function registerServiceWorker() {
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js', { scope: '/' })
-                .then(reg => {
-                    console.log('Service Worker registered successfully.');
-                    reg.addEventListener('updatefound', () => {
-                        const installingWorker = reg.installing;
-                        installingWorker.addEventListener('statechange', () => {
-                            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                console.log('New service worker installed, refresh to activate.');
-                                showToast('🔄 App update available. Please refresh or reopen.', 'info');
-                            }
-                        });
+        if (!('serviceWorker' in navigator)) return;
+
+        // Dynamically compute the base path (for GitHub Pages subdirectory)
+        const basePath = window.location.pathname.replace(/\/[^/]*$/, '/') || '/';
+
+        navigator.serviceWorker.register('./sw.js', { scope: basePath })
+            .then(reg => {
+                console.log('Service Worker registered with scope:', reg.scope);
+                reg.addEventListener('updatefound', () => {
+                    const newWorker = reg.installing;
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New SW is waiting – notify user
+                            showToast('🔄 A new version is available. Please refresh.', 'info');
+                            // Optionally auto-skipWaiting by sending a message
+                            newWorker.postMessage('skipWaiting');
+                        }
                     });
-                })
-                .catch(err => console.warn('Service Worker registration failed:', err));
-        }
+                });
+            })
+            .catch(err => console.warn('Service Worker registration failed:', err));
+
+        // Listen for controller changes (when a new SW takes over)
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('Service Worker controller changed, reloading for fresh assets.');
+            // Reload only once to pick up new assets
+            if (localStorage.getItem('sw_reloaded') !== 'true') {
+                localStorage.setItem('sw_reloaded', 'true');
+                window.location.reload();
+            } else {
+                localStorage.removeItem('sw_reloaded');
+            }
+        });
     }
 
     // ---------- IndexedDB functions ----------
