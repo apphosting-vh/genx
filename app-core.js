@@ -1557,7 +1557,7 @@
     const GST_SLABS = [0, 5, 12, 18, 28];
     const PAYMENT_TERMS = ['Immediate', 'Net 15 Days', 'Net 30 Days', 'Net 45 Days', 'Net 60 Days', 'Net 90 Days'];
     const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue', 'Partially Paid'];
-    const PRODUCT_TYPES = ['Product', 'Service'];
+    const PRODUCT_TYPES = ['Product', 'Service', 'Spare']; // Added 'Spare'
     const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
     const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
 
@@ -2448,6 +2448,7 @@
     }
 
     // ---------- Products (Enhanced) ----------
+    // Renamed to "Inventory" in the UI. The page title and button texts are changed.
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
@@ -2456,7 +2457,7 @@
             let searchTerm = '';
             let filteredProducts = [...allProducts];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Products & Services</h1><button class="btn btn-primary" id="addProductBtn">+ Add Product</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><button class="btn btn-primary" id="addProductBtn">+ Add Item</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
@@ -2488,7 +2489,7 @@
                         </td>
                     </tr>`;
                 });
-                if (!filteredProducts.length) html += `<tr><td colspan="10" class="empty-state">No products found.</td></tr>`;
+                if (!filteredProducts.length) html += `<tr><td colspan="10" class="empty-state">No items found.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addProductBtn')?.addEventListener('click', () => showProductModal());
@@ -2510,7 +2511,7 @@
             filteredProducts = [...allProducts];
             renderTable();
             setTimeout(() => { document.getElementById('applyProdSearch')?.addEventListener('click', apply); document.getElementById('clearProdSearch')?.addEventListener('click', clear); }, 0);
-        } catch(err) { showToast('Failed to load products', 'error'); }
+        } catch(err) { showToast('Failed to load inventory', 'error'); }
     }
 
     async function showProductModal(prodData = null) {
@@ -2527,17 +2528,17 @@
                 else defaultStatus = 'In Stock';
             }
 
-            const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Product/Service</h3>
+            const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Item</h3>
                 <form id="prodForm">
                     <div class="form-grid">
                         <!-- Basic Info -->
                         <div class="form-group"><label>Type</label><select id="prodType">${PRODUCT_TYPES.map(t => `<option value="${t}" ${isEdit && prodData.type === t ? 'selected' : (t === 'Product' && !isEdit ? 'selected' : '')}>${t}</option>`).join('')}</select></div>
                         <div class="form-group"><label>SKU (Item ID)</label><input id="prodSku" value="${isEdit ? escapeHtml(prodData.sku || '') : ''}" placeholder="e.g. GEN-001"></div>
-                        <div class="form-group"><label>Generator Name *</label><input id="prodName" value="${isEdit ? escapeHtml(prodData.name) : ''}" required></div>
+                        <div class="form-group"><label>Item Name *</label><input id="prodName" value="${isEdit ? escapeHtml(prodData.name) : ''}" required></div>
                         <div class="form-group"><label>Brand</label><input id="prodBrand" value="${isEdit ? escapeHtml(prodData.brand || '') : ''}"></div>
                         <div class="form-group"><label>Model Number</label><input id="prodModel" value="${isEdit ? escapeHtml(prodData.modelNumber || '') : ''}"></div>
                         <div class="form-group"><label>Category</label><input id="prodCategory" value="${isEdit ? escapeHtml(prodData.category || '') : ''}"></div>
-                        <!-- Generator Specs -->
+                        <!-- Generator Specs (keep for products) -->
                         <div class="form-group"><label>Fuel Type</label>
                             <select id="prodFuelType">
                                 <option value="">Select</option>
@@ -2581,7 +2582,7 @@
                             </select>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-primary" style="margin-top:16px;">${isEdit ? 'Update' : 'Save'} Product</button>
+                    <button type="submit" class="btn btn-primary" style="margin-top:16px;">${isEdit ? 'Update' : 'Save'} Item</button>
                 </form></div></div>`;
             document.getElementById('modalContainer').innerHTML = modalHtml;
             const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
@@ -2616,10 +2617,10 @@
                         status: document.getElementById('prodStatus').value
                     };
                     if (isEdit) { obj.id = prodData.id; await dbPut('products', obj); } else await dbAdd('products', obj);
-                    close(); await renderProducts(); showToast('Product saved', 'success');
-                } catch(err) { showToast('Error saving product', 'error'); console.error(err); }
+                    close(); await renderProducts(); showToast('Item saved', 'success');
+                } catch(err) { showToast('Error saving item', 'error'); console.error(err); }
             });
-        } catch(err) { showToast('Error opening product form', 'error'); }
+        } catch(err) { showToast('Error opening item form', 'error'); }
     }
 
     // ---------- Business Profile ----------
