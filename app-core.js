@@ -1,6 +1,7 @@
 // app-core.js - GenFin Modern Edition (Profit Tracking & Reporting)
 // WITH PERSISTENT OAUTH, FOLDER CACHING, UPSERT BACKUP, DISCONNECT, REFINED UI,
 // SYNC STATUS INDICATOR, RETRY-ON-401, SMART AUTO-BACKUP
+// PATCH: Fixed 401 on userinfo, 403 on upload with fallback to new file creation
 (function() {
     'use strict';
 
@@ -126,7 +127,7 @@
 
     function dbDeleteSetting(key) {
         return new Promise((resolve, reject) => {
-            const tx = db.transaction('settings', 'readwrite');
+            const tx = db.transaction('settings', 'readonly');
             const store = tx.objectStore('settings');
             const request = store.delete(key);
             request.onsuccess = () => resolve();
@@ -148,6 +149,7 @@
     let folderIdCache = null;
     let lastBackupFileId = null;
     let initPromise = null; // for concurrency control
+    let isRefreshing = false; // prevent concurrent refreshes
 
     const GD_CLIENT_ID = '769525551930-5d645morj103efjqp7baq95b3629k38h.apps.googleusercontent.com';
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -226,32 +228,61 @@
         if (!tokenClient) {
             throw new Error('Token client not available');
         }
-        return new Promise((resolve, reject) => {
-            const originalCallback = tokenClient.callback;
-            tokenClient.callback = (resp) => {
-                tokenClient.callback = originalCallback;
-                if (resp.error) {
-                    reject(new Error(resp.error));
-                } else {
-                    saveDriveToken(resp.access_token, resp.expires_in, currentDriveUserEmail)
-                        .then(() => resolve(accessToken))
-                        .catch(reject);
-                }
-            };
-            tokenClient.requestAccessToken({ prompt: '' });
-        });
+        if (isRefreshing) {
+            // Wait for the ongoing refresh to complete
+            return new Promise((resolve) => {
+                const check = () => {
+                    if (!isRefreshing) resolve(accessToken);
+                    else setTimeout(check, 200);
+                };
+                check();
+            });
+        }
+        isRefreshing = true;
+        try {
+            return new Promise((resolve, reject) => {
+                const originalCallback = tokenClient.callback;
+                tokenClient.callback = (resp) => {
+                    tokenClient.callback = originalCallback;
+                    if (resp.error) {
+                        isRefreshing = false;
+                        reject(new Error(resp.error));
+                    } else {
+                        setAccessToken(resp.access_token);
+                        tokenExpiry = Date.now() + (resp.expires_in * 1000);
+                        // Don't refetch email on every refresh, but update expiry
+                        dbSetSetting('gdrive_token', resp.access_token).then(() => {
+                            dbSetSetting('gdrive_expiry', tokenExpiry);
+                            scheduleTokenRefresh(tokenExpiry);
+                            setSyncState('idle');
+                            isRefreshing = false;
+                            resolve(accessToken);
+                        }).catch(err => {
+                            isRefreshing = false;
+                            reject(err);
+                        });
+                    }
+                };
+                tokenClient.requestAccessToken({ prompt: '' });
+            });
+        } catch (err) {
+            isRefreshing = false;
+            throw err;
+        }
     }
 
     async function withTokenRetry(fn, retry = true) {
         try {
             return await fn();
         } catch (err) {
-            if (retry && err.status === 401) {
+            // Handle 401 by refreshing token and retrying
+            if (retry && (err.status === 401 || (err.result && err.result.error && err.result.error.code === 401))) {
                 console.warn('401 detected, attempting token refresh');
                 setSyncState('expired');
                 setAccessToken(null);
                 try {
                     await refreshAccessToken();
+                    // Retry once with the new token
                     return await fn();
                 } catch (refreshErr) {
                     setSyncState('disconnected', 'Token refresh failed');
@@ -289,6 +320,7 @@
         currentDriveUserEmail = '';
         folderIdCache = null;
         lastBackupFileId = null;
+        isRefreshing = false;
         if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
         await dbDeleteSetting('gdrive_token');
         await dbDeleteSetting('gdrive_expiry');
@@ -339,7 +371,8 @@
                         currentDriveUserEmail = stored.email || '';
                         updateDriveUI(true);
                         scheduleTokenRefresh(tokenExpiry);
-                        fetchDriveUserEmail();
+                        // Fetch email in background (don't block)
+                        fetchDriveUserEmail().catch(() => {});
                         setSyncState('idle');
                         scheduleAutoBackup();
                         console.log('Drive token restored from DB');
@@ -390,7 +423,6 @@
             }
             gapi.load('client', async () => {
                 try {
-                    // Do NOT pass clientId and scope here – handled by GIS token client.
                     await gapi.client.init({
                         discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
                     });
@@ -420,17 +452,38 @@
                             return;
                         }
                         try {
-                            // Set token first so email fetch can use it
+                            // Set token first so subsequent calls can use it
                             setAccessToken(resp.access_token);
-                            const email = await fetchDriveUserEmail();
+                            // Try to fetch email, but don't fail if it doesn't work
+                            let email = '';
+                            try {
+                                email = await fetchDriveUserEmail();
+                            } catch (emailErr) {
+                                console.warn('Could not fetch user email, continuing with empty email:', emailErr);
+                                // If it's a 401, try one more time with a fresh token
+                                if (emailErr.status === 401) {
+                                    try {
+                                        await refreshAccessToken();
+                                        email = await fetchDriveUserEmail();
+                                    } catch (retryErr) {
+                                        console.warn('Retry for email also failed:', retryErr);
+                                    }
+                                }
+                            }
                             await saveDriveToken(resp.access_token, resp.expires_in, email);
                             updateDriveUI(true);
                             showToast('Connected to Google Drive', 'success');
+                            // Fetch email again after token is saved (background)
+                            fetchDriveUserEmail().catch(() => {});
                         } catch (e) {
-                            // If email fetch fails, still save token
-                            await saveDriveToken(resp.access_token, resp.expires_in, '');
-                            updateDriveUI(true);
-                            showToast('Connected (email not available)', 'success');
+                            // If anything fails, still try to save the token
+                            try {
+                                await saveDriveToken(resp.access_token, resp.expires_in, '');
+                                updateDriveUI(true);
+                                showToast('Connected (email not available)', 'success');
+                            } catch (saveErr) {
+                                showToast('Error connecting to Drive: ' + saveErr.message, 'error');
+                            }
                         }
                     }
                 });
@@ -443,11 +496,19 @@
     }
 
     async function fetchDriveUserEmail() {
-        if (!accessToken) return '';
+        if (!accessToken) {
+            console.warn('fetchDriveUserEmail: no access token');
+            return '';
+        }
         try {
             const res = await fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
                 headers: { Authorization: `Bearer ${accessToken}` }
             });
+            if (!res.ok) {
+                const err = new Error('Userinfo request failed: ' + res.status);
+                err.status = res.status;
+                throw err;
+            }
             const data = await res.json();
             if (data.email) {
                 currentDriveUserEmail = data.email;
@@ -455,17 +516,19 @@
                 if (emailSpan) emailSpan.textContent = currentDriveUserEmail;
                 return data.email;
             }
+            return '';
         } catch (err) {
-            console.warn('Could not fetch user email', err);
+            console.warn('fetchDriveUserEmail error:', err.message);
+            // If it's a 401, let the caller handle it
+            if (err.status === 401) throw err;
+            return '';
         }
-        return '';
     }
 
     // ---- Sign-in with robust error handling ----
     function signInToGoogle() {
         console.log('signInToGoogle called');
         try {
-            // If not initialized or failed, force a fresh initialization
             if (!driveInitialized || driveInitFailed) {
                 initGoogleDriveModule(true)
                     .then(() => {
@@ -481,7 +544,6 @@
                         showToast('Failed to initialize Google Drive: ' + err.message, 'error');
                     });
             } else {
-                // Already initialized, just request token
                 if (tokenClient) {
                     tokenClient.requestAccessToken({ prompt: 'consent' });
                 } else {
@@ -531,18 +593,39 @@
 
     async function getLatestBackupFileId() {
         if (!accessToken) return null;
-        const folderId = await ensureBackupFolder();
-        const response = await withTokenRetry(() =>
-            gapi.client.drive.files.list({
-                q: `'${folderId}' in parents and name='${GD_BACKUP_FILENAME}' and trashed=false`,
-                fields: 'files(id, name)',
-            })
-        );
-        if (response.result.files.length > 0) {
-            lastBackupFileId = response.result.files[0].id;
-            return lastBackupFileId;
+        try {
+            const folderId = await ensureBackupFolder();
+            const response = await withTokenRetry(() =>
+                gapi.client.drive.files.list({
+                    q: `'${folderId}' in parents and name='${GD_BACKUP_FILENAME}' and trashed=false`,
+                    fields: 'files(id, name)',
+                })
+            );
+            if (response.result.files.length > 0) {
+                lastBackupFileId = response.result.files[0].id;
+                return lastBackupFileId;
+            }
+            return null;
+        } catch (err) {
+            // If we can't list files (e.g., 403), return null so we try to create a new one
+            console.warn('getLatestBackupFileId error:', err);
+            return null;
         }
-        return null;
+    }
+
+    // Delete a file from Drive (used as fallback when PATCH fails with 403)
+    async function deleteDriveFile(fileId) {
+        if (!accessToken || !fileId) return false;
+        try {
+            await withTokenRetry(() =>
+                gapi.client.drive.files.delete({ fileId })
+            );
+            console.log('Deleted file:', fileId);
+            return true;
+        } catch (err) {
+            console.warn('Failed to delete file:', err);
+            return false;
+        }
     }
 
     async function uploadBackupToDrive(showToastMsg = true) {
@@ -570,12 +653,15 @@
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
 
+            // Try to get existing file ID
             let fileId = await getLatestBackupFileId();
             let uploadUrl, method;
             let metadata = {
                 name: GD_BACKUP_FILENAME,
                 parents: [folderId],
             };
+
+            // If we have a fileId, try to update it with PATCH
             if (fileId) {
                 uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
                 method = 'PATCH';
@@ -588,27 +674,91 @@
             form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
             form.append('file', blob);
 
-            const response = await withTokenRetry(async () => {
-                const res = await fetch(uploadUrl, {
-                    method: method,
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                    body: form,
-                });
-                if (!res.ok) throw new Error('Upload failed: ' + res.status);
-                return res;
-            });
+            let response;
+            let uploadSuccess = false;
 
-            const result = await response.json();
-            lastBackupFileId = result.id;
+            try {
+                response = await withTokenRetry(async () => {
+                    const res = await fetch(uploadUrl, {
+                        method: method,
+                        headers: { Authorization: `Bearer ${accessToken}` },
+                        body: form,
+                    });
+                    if (!res.ok) {
+                        const err = new Error('Upload failed: ' + res.status);
+                        err.status = res.status;
+                        throw err;
+                    }
+                    return res;
+                });
+                uploadSuccess = true;
+            } catch (err) {
+                // If we got a 403 and we were trying to PATCH, try creating a new file
+                if (err.status === 403 && method === 'PATCH') {
+                    console.warn('403 on PATCH, trying to create a new file...');
+                    // Try to delete the old file first (if possible)
+                    if (fileId) {
+                        await deleteDriveFile(fileId);
+                    }
+                    // Now create a new file with POST
+                    const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+                    const newForm = new FormData();
+                    // Use a unique name to avoid conflicts
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const uniqueName = `genfin_backup_${timestamp}.json`;
+                    const newMetadata = {
+                        name: uniqueName,
+                        parents: [folderId],
+                    };
+                    newForm.append('metadata', new Blob([JSON.stringify(newMetadata)], { type: 'application/json' }));
+                    newForm.append('file', blob);
+
+                    const retryRes = await withTokenRetry(async () => {
+                        const res = await fetch(newUploadUrl, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${accessToken}` },
+                            body: newForm,
+                        });
+                        if (!res.ok) {
+                            const e = new Error('Upload failed: ' + res.status);
+                            e.status = res.status;
+                            throw e;
+                        }
+                        return res;
+                    });
+                    response = retryRes;
+                    uploadSuccess = true;
+                    // Update lastBackupFileId to the new file
+                    const result = await response.json();
+                    lastBackupFileId = result.id;
+                    // Update the view backup link with the new file
+                    updateViewBackupLink(lastBackupFileId);
+                    console.log('Created new backup file with ID:', lastBackupFileId);
+                } else {
+                    throw err;
+                }
+            }
+
+            // If we successfully uploaded and it was a PATCH, get the result
+            if (uploadSuccess && method === 'PATCH') {
+                const result = await response.json();
+                lastBackupFileId = result.id;
+                updateViewBackupLink(lastBackupFileId);
+            } else if (uploadSuccess && method === 'POST' && !lastBackupFileId) {
+                // For POST, we already set lastBackupFileId above
+                // But if we didn't (e.g., initial upload), get it from response
+                const result = await response.json();
+                lastBackupFileId = result.id;
+                updateViewBackupLink(lastBackupFileId);
+            }
 
             localStorage.setItem('genfin_last_backup', new Date().toISOString());
             setSyncState('success');
             updateLastBackupUI();
             if (showToastMsg) showToast('Backup uploaded to Google Drive', 'success');
-            updateViewBackupLink(result.id);
             return true;
         } catch (err) {
-            console.error(err);
+            console.error('uploadBackupToDrive error:', err);
             setSyncState('error', err.message);
             if (showToastMsg) showToast('Backup upload failed: ' + err.message, 'error');
             return false;
@@ -2223,7 +2373,7 @@
         updateLastBackupUI();
         updateSettingsUI();
         if (accessToken) {
-            fetchDriveUserEmail();
+            fetchDriveUserEmail().catch(() => {});
             if (lastBackupFileId) {
                 updateViewBackupLink(lastBackupFileId);
             }
