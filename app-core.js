@@ -5,6 +5,7 @@
 // PATCH: Better popup blocker handling and user guidance
 // PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
 // PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
+// PATCH: Removed invalid :contains() selector for nav insertion
 
 (function() {
     'use strict';
@@ -3331,11 +3332,9 @@
         });
     }
 
-    // ---- Add navigation item dynamically ----
+    // ---- Add navigation item dynamically (fixed :contains removal) ----
     function addServiceWarrantyNav() {
-        const manageSection = document.querySelector('.nav-section .nav-label:contains("Manage")');
         const navItems = document.querySelectorAll('.nav-section .nav-item');
-        // Find the position after "Products" or before "Reports"
         let productsItem = null;
         let reportsItem = null;
         navItems.forEach(item => {
@@ -3358,10 +3357,9 @@
                 </svg>
                 Service & Warranty
             `;
-            // Insert after products item
             productsItem.parentNode.insertBefore(newNav, reportsItem);
         } else {
-            // Fallback: append to the last nav-section
+            // fallback: append to last nav-section
             const lastSection = document.querySelector('.nav-section:last-child');
             if (lastSection) {
                 const newNav = document.createElement('div');
