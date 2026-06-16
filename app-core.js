@@ -2703,30 +2703,54 @@
     }
 
     // ---------- Business Profile ----------
+    // Enhanced to include all business contact and banking details
     function renderProfile() {
         const p = getProfile();
         mainContent.innerHTML = `
             <div class="page-header"><h1 class="page-title">Business Profile</h1></div>
-            <div class="card"><form id="profileForm">
-                <div class="form-grid">
-                    <div class="form-group"><label>Business Name</label><input id="bizName" value="${escapeHtml(p.businessName)}"></div>
-                    <div class="form-group"><label>GSTIN</label><input id="bizGstin" value="${escapeHtml(p.gstin)}"></div>
-                    <div class="form-group"><label>State</label><input id="bizState" value="${escapeHtml(p.state)}"></div>
-                    <div class="form-group"><label>Invoice Prefix</label><input id="bizPrefix" value="${escapeHtml(p.invoicePrefix)}"></div>
-                    <!-- Invoice and PO numbers are now stored in settings, removed from profile -->
-                </div>
-                <button type="submit" class="btn btn-primary" style="margin-top:12px;">Update Profile</button>
-            </form></div>
+            <div class="card">
+                <p style="color: #6b7280; margin-bottom: 16px;">These details will appear on all invoices and purchase orders. Update them to reflect your current business information.</p>
+                <form id="profileForm">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Business Name</label><input id="bizName" value="${escapeHtml(p.businessName)}"></div>
+                        <div class="form-group"><label>GSTIN</label><input id="bizGstin" value="${escapeHtml(p.gstin)}"></div>
+                        <div class="form-group"><label>Address Line</label><input id="bizAddress" value="${escapeHtml(p.address)}"></div>
+                        <div class="form-group"><label>City</label><input id="bizCity" value="${escapeHtml(p.city)}"></div>
+                        <div class="form-group"><label>State</label><input id="bizState" value="${escapeHtml(p.state)}"></div>
+                        <div class="form-group"><label>Pincode</label><input id="bizPincode" value="${escapeHtml(p.pincode)}"></div>
+                        <div class="form-group"><label>Email</label><input id="bizEmail" type="email" value="${escapeHtml(p.email)}"></div>
+                        <div class="form-group"><label>Phone</label><input id="bizPhone" value="${escapeHtml(p.phone)}"></div>
+                        <div class="form-group"><label>Invoice Prefix</label><input id="bizPrefix" value="${escapeHtml(p.invoicePrefix)}"></div>
+                        <!-- Banking Details -->
+                        <div class="form-group"><label>Bank Name</label><input id="bizBankName" value="${escapeHtml(p.bankName)}"></div>
+                        <div class="form-group"><label>Account Number</label><input id="bizAccountNo" value="${escapeHtml(p.accountNo)}"></div>
+                        <div class="form-group"><label>IFSC Code</label><input id="bizIfsc" value="${escapeHtml(p.ifsc)}"></div>
+                        <div class="form-group"><label>UPI ID</label><input id="bizUpi" value="${escapeHtml(p.upi)}"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="margin-top:12px;">Update Profile</button>
+                </form>
+            </div>
         `;
         document.getElementById('profileForm').addEventListener('submit', e => {
             e.preventDefault();
-            const updated = { ...getProfile() };
-            updated.businessName = document.getElementById('bizName').value;
-            updated.gstin = document.getElementById('bizGstin').value;
-            updated.state = document.getElementById('bizState').value;
-            updated.invoicePrefix = document.getElementById('bizPrefix').value;
+            const updated = {
+                businessName: document.getElementById('bizName').value,
+                gstin: document.getElementById('bizGstin').value,
+                address: document.getElementById('bizAddress').value,
+                city: document.getElementById('bizCity').value,
+                state: document.getElementById('bizState').value,
+                pincode: document.getElementById('bizPincode').value,
+                email: document.getElementById('bizEmail').value,
+                phone: document.getElementById('bizPhone').value,
+                invoicePrefix: document.getElementById('bizPrefix').value,
+                bankName: document.getElementById('bizBankName').value,
+                accountNo: document.getElementById('bizAccountNo').value,
+                ifsc: document.getElementById('bizIfsc').value,
+                upi: document.getElementById('bizUpi').value
+            };
             saveProfile(updated);
-            showToast('Profile updated', 'success');
+            showToast('Profile updated successfully.', 'success');
+            // Refresh any open views if needed? Not necessary.
         });
     }
 
@@ -2829,7 +2853,7 @@
         await dbDeleteSetting('localFileHandle');
         localFileHandle = null;
         localFileLastWriteTime = null;
-        updateLocalFileUI();
+        await updateLocalFileUI();
     }
 
     // Request a file handle from user (save as dialog)
@@ -2863,7 +2887,7 @@
             // Save info
             await saveLocalFileHandleInfo(handle.name);
             showToast(`Local file selected: ${handle.name}`, 'success');
-            updateLocalFileUI();
+            await updateLocalFileUI();
             return true;
         } catch (err) {
             if (err.name !== 'AbortError' && err.name !== 'SecurityError') {
@@ -2943,7 +2967,7 @@
             await writable.close();
             localFileLastWriteTime = new Date().toISOString();
             await saveLocalFileHandleInfo(localFileHandle.name);
-            updateLocalFileUI();
+            await updateLocalFileUI();
             return true;
         } catch (err) {
             console.error('Error writing to local file:', err);
@@ -2958,8 +2982,8 @@
     }
 
     // Debounced write to local file
-    function scheduleLocalFileWrite() {
-        if (!localFileHandle && !localFileHandleInfoExists()) {
+    async function scheduleLocalFileWrite() {
+        if (!localFileHandle && !(await localFileHandleInfoExists())) {
             // No file selected, skip
             return;
         }
@@ -3024,12 +3048,12 @@
             // So we'll just show a reconnect toast.
             showLocalFileReconnectToast();
             // Also update UI to show the file name
-            updateLocalFileUI(info.fileName);
+            await updateLocalFileUI(info.fileName);
         }
     }
 
     // Update UI elements for local file sync (in Settings)
-    function updateLocalFileUI(fileName) {
+    async function updateLocalFileUI(fileName) {
         const statusEl = document.getElementById('localFileStatus');
         const nameEl = document.getElementById('localFileName');
         const lastWriteEl = document.getElementById('localFileLastWrite');
@@ -3061,13 +3085,12 @@
                 lastWriteEl.textContent = new Date(localFileLastWriteTime).toLocaleString();
             } else {
                 // try to load from settings
-                loadLocalFileHandle().then(info => {
-                    if (info && info.lastWrite) {
-                        lastWriteEl.textContent = new Date(info.lastWrite).toLocaleString();
-                    } else {
-                        lastWriteEl.textContent = 'Never';
-                    }
-                });
+                const info = await loadLocalFileHandle();
+                if (info && info.lastWrite) {
+                    lastWriteEl.textContent = new Date(info.lastWrite).toLocaleString();
+                } else {
+                    lastWriteEl.textContent = 'Never';
+                }
             }
         }
         if (selectBtn) {
@@ -3082,7 +3105,7 @@
     async function disconnectLocalFile() {
         if (confirm('Disconnect local file sync?')) {
             await clearLocalFileHandleInfo();
-            updateLocalFileUI();
+            await updateLocalFileUI();
             showToast('Local file sync disconnected', 'info');
         }
     }
@@ -3205,7 +3228,7 @@
         if (selectLocalBtn) {
             selectLocalBtn.addEventListener('click', async () => {
                 await requestLocalFileHandle();
-                updateLocalFileUI();
+                await updateLocalFileUI();
             });
         }
         if (disconnectLocalBtn) {
@@ -3281,7 +3304,7 @@
         updateDriveUI(!!accessToken);
         updateLastBackupUI();
         updateSettingsUI();
-        updateLocalFileUI();
+        await updateLocalFileUI();
         if (accessToken) {
             fetchDriveUserEmail().catch(() => {});
             if (lastBackupFileId) {
