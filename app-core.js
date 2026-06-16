@@ -144,7 +144,6 @@
     // ---------- App Version Check ----------
     async function checkForAppUpdate() {
         try {
-            // Use cache-busting to avoid stale version file
             const url = `./app-version.json?t=${Date.now()}`;
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
@@ -156,7 +155,6 @@
             if (!remoteVersion) return;
 
             if (remoteVersion !== APP_VERSION) {
-                // New version available
                 showUpdateToast(remoteVersion);
             } else {
                 console.log('App is up to date (v' + APP_VERSION + ')');
@@ -170,7 +168,6 @@
         const container = document.getElementById('toastContainer');
         if (!container) return;
 
-        // Remove any existing update toast
         const existing = container.querySelector('.toast-update');
         if (existing) existing.remove();
 
@@ -186,13 +183,11 @@
             e.stopPropagation();
             await performAppUpdate();
         });
-        // Also click on toast itself triggers update
         toast.addEventListener('click', async () => {
             await performAppUpdate();
         });
 
         container.appendChild(toast);
-        // Auto-hide after 30 seconds?
         setTimeout(() => {
             if (toast.parentNode) toast.remove();
         }, 30000);
@@ -201,19 +196,15 @@
     async function performAppUpdate() {
         try {
             showToast('Updating app...', 'info');
-            // Unregister all service workers
             const registrations = await navigator.serviceWorker.getRegistrations();
             for (const registration of registrations) {
                 await registration.unregister();
             }
-            // Delete all caches
             const cacheNames = await caches.keys();
             await Promise.all(cacheNames.map(name => caches.delete(name)));
-            // Clear any stale data (optional)
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
-            // Reload the page to fetch fresh resources
             window.location.reload(true);
         } catch (err) {
             console.error('Update failed:', err);
@@ -223,9 +214,7 @@
 
     function scheduleVersionCheck() {
         if (versionCheckTimer) clearInterval(versionCheckTimer);
-        // Check immediately on first call
         checkForAppUpdate();
-        // Then every interval
         versionCheckTimer = setInterval(checkForAppUpdate, VERSION_CHECK_INTERVAL);
     }
 
@@ -1906,8 +1895,31 @@
             document.getElementById('invoiceForm').addEventListener('submit', async e => {
                 e.preventDefault();
                 try {
+                    // Validation: ensure customer selected and at least one item
+                    const customerId = Number(customerSelect.value);
+                    if (!customerId || isNaN(customerId) || customerId <= 0) {
+                        showToast('Please select a valid customer.', 'error');
+                        return;
+                    }
+                    const itemRows = document.querySelectorAll('.invoice-item-row');
+                    if (itemRows.length === 0) {
+                        showToast('Please add at least one item.', 'error');
+                        return;
+                    }
+                    // Validate each item has qty > 0 and rate > 0
+                    let valid = true;
+                    itemRows.forEach(row => {
+                        const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+                        const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
+                        if (qty <= 0 || rate <= 0) valid = false;
+                    });
+                    if (!valid) {
+                        showToast('Each item must have quantity and rate greater than zero.', 'error');
+                        return;
+                    }
+
                     const itemsRaw = [];
-                    document.querySelectorAll('.invoice-item-row').forEach(row => {
+                    itemRows.forEach(row => {
                         itemsRaw.push({
                             productId: row.querySelector('.item-product').value,
                             qty: parseFloat(row.querySelector('.item-qty').value) || 0,
@@ -1915,7 +1927,6 @@
                             selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 18
                         });
                     });
-                    const customerId = Number(customerSelect.value);
                     const customer = customers.find(c => c.id === customerId);
                     const stateOfSupply = customer ? customer.state : profile.state;
                     const discount = parseFloat(document.getElementById('invDiscount').value) || 0;
@@ -2159,8 +2170,31 @@
             document.getElementById('poForm').addEventListener('submit', async e => {
                 e.preventDefault();
                 try {
+                    // Validation: ensure supplier selected and at least one item
+                    const supplierId = Number(supplierSelect.value);
+                    if (!supplierId || isNaN(supplierId) || supplierId <= 0) {
+                        showToast('Please select a valid supplier.', 'error');
+                        return;
+                    }
+                    const itemRows = document.querySelectorAll('.po-item-row');
+                    if (itemRows.length === 0) {
+                        showToast('Please add at least one item.', 'error');
+                        return;
+                    }
+                    // Validate each item
+                    let valid = true;
+                    itemRows.forEach(row => {
+                        const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+                        const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
+                        if (qty <= 0 || rate <= 0) valid = false;
+                    });
+                    if (!valid) {
+                        showToast('Each item must have quantity and rate greater than zero.', 'error');
+                        return;
+                    }
+
                     const itemsRaw = [];
-                    document.querySelectorAll('.po-item-row').forEach(row => {
+                    itemRows.forEach(row => {
                         itemsRaw.push({
                             productId: row.querySelector('.item-product').value,
                             qty: parseFloat(row.querySelector('.item-qty').value) || 0,
@@ -2168,7 +2202,6 @@
                             selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 18
                         });
                     });
-                    const supplierId = Number(supplierSelect.value);
                     const supplier = suppliers.find(s => s.id === supplierId);
                     const stateOfSupply = supplier ? supplier.state : profile.state;
                     const discount = parseFloat(document.getElementById('poDiscount').value) || 0;
@@ -2955,6 +2988,7 @@
         document.getElementById('reportOutput').innerHTML = outputHtml;
         const ctx = document.getElementById('trendsChart').getContext('2d');
         if (currentTrendChart) currentTrendChart.destroy();
+        // Even with all zeros, chart can render, but if all data is zero, it's fine.
         currentTrendChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -2994,16 +3028,24 @@
         const taxData = rates.map(r => invoiceTaxByRate[r].cgst + invoiceTaxByRate[r].sgst + invoiceTaxByRate[r].igst);
         const invoiceRateRows = rates.map(rate => { const r = invoiceTaxByRate[rate]; return `<tr><td>${rate}%</td><td class="text-right">${formatCurrency(r.taxable)}</td><td class="text-right">${formatCurrency(r.cgst)}</td><td class="text-right">${formatCurrency(r.sgst)}</td><td class="text-right">${formatCurrency(r.igst)}</td><td class="text-right">${formatCurrency(r.cgst+r.sgst+r.igst)}</td></tr>`; }).join('');
         const poRateRows = Object.keys(poTaxByRate).sort((a,b)=>Number(a)-Number(b)).map(rate => { const r = poTaxByRate[rate]; return `<tr><td>${rate}%</td><td class="text-right">${formatCurrency(r.taxable)}</td><td class="text-right">${formatCurrency(r.cgst)}</td><td class="text-right">${formatCurrency(r.sgst)}</td><td class="text-right">${formatCurrency(r.igst)}</td><td class="text-right">${formatCurrency(r.cgst+r.sgst+r.igst)}</td></tr>`; }).join('');
+        let chartHtml = '';
+        if (rates.length > 0) {
+            chartHtml = `<div class="chart-container"><canvas id="gstChart" width="400" height="200"></canvas></div>`;
+        } else {
+            chartHtml = `<p style="color:#6b7280;">No GST data available for this period.</p>`;
+        }
         const outputHtml = `<h2>GST Summary: ${periodLabel}</h2><div class="stat-row"><div class="stat-card"><div class="stat-value">${formatCurrency(totalInvTaxable)}</div><div class="stat-label">Sales Taxable</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(totalPOTaxable)}</div><div class="stat-label">Purchase Taxable</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(totalInvCGST+totalInvSGST+totalInvIGST)}</div><div class="stat-label">Sales GST</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(totalPOCGST+totalPOSGST+totalPOIGST)}</div><div class="stat-label">Purchase GST</div></div></div>
-        <div class="chart-container"><canvas id="gstChart" width="400" height="200"></canvas></div>
+        ${chartHtml}
         <div class="card"><h3>Outward Supplies (Sales)</h3>${allInvoiceItems.length ? `<div class="table-wrap"><table><thead><tr><th>Rate</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead><tbody>${invoiceRateRows}<tr style="background:#f9fafb; font-weight:bold;"><td>Total</td><td class="text-right">${formatCurrency(totalInvTaxable)}</td><td class="text-right">${formatCurrency(totalInvCGST)}</td><td class="text-right">${formatCurrency(totalInvSGST)}</td><td class="text-right">${formatCurrency(totalInvIGST)}</td><td class="text-right">${formatCurrency(totalInvCGST+totalInvSGST+totalInvIGST)}</td></tr></tbody></table></div>` : '<p>No invoices.</p>'}</div>
         <div class="card"><h3>Inward Supplies (Purchases)</h3>${allPOItems.length ? `<div class="table-wrap"><table><thead><tr><th>Rate</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead><tbody>${poRateRows}<tr style="background:#f9fafb; font-weight:bold;"><td>Total</td><td class="text-right">${formatCurrency(totalPOTaxable)}</td><td class="text-right">${formatCurrency(totalPOCGST)}</td><td class="text-right">${formatCurrency(totalPOSGST)}</td><td class="text-right">${formatCurrency(totalPOIGST)}</td><td class="text-right">${formatCurrency(totalPOCGST+totalPOSGST+totalPOIGST)}</td></tr></tbody></table></div>` : '<p>No POs.</p>'}</div>
         <div class="card"><h3>Net GST Liability</h3><div class="stat-row"><div class="stat-card"><div class="stat-value">${formatCurrency((totalInvCGST+totalInvSGST) - (totalPOCGST+totalPOSGST))}</div><div class="stat-label">Net CGST+SGST</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(totalInvIGST - totalPOIGST)}</div><div class="stat-label">Net IGST</div></div></div></div>`;
         if (renderToDom) {
             document.getElementById('reportOutput').innerHTML = outputHtml;
-            const ctx = document.getElementById('gstChart').getContext('2d');
-            if (currentChart) currentChart.destroy();
-            currentChart = new Chart(ctx, { type: 'bar', data: { labels: rates.map(r => `${r}%`), datasets: [{ label: 'Taxable Value', data: taxableData, backgroundColor: '#4f46e5' }, { label: 'Total Tax', data: taxData, backgroundColor: '#f59e0b' }] }, options: { responsive: true, maintainAspectRatio: true } });
+            if (rates.length > 0) {
+                const ctx = document.getElementById('gstChart').getContext('2d');
+                if (currentChart) currentChart.destroy();
+                currentChart = new Chart(ctx, { type: 'bar', data: { labels: rates.map(r => `${r}%`), datasets: [{ label: 'Taxable Value', data: taxableData, backgroundColor: '#4f46e5' }, { label: 'Total Tax', data: taxData, backgroundColor: '#f59e0b' }] }, options: { responsive: true, maintainAspectRatio: true } });
+            }
         }
         return { periodLabel, invoices: { byRate: invoiceTaxByRate, totals: { taxable: totalInvTaxable, cgst: totalInvCGST, sgst: totalInvSGST, igst: totalInvIGST } }, pos: { byRate: poTaxByRate, totals: { taxable: totalPOTaxable, cgst: totalPOCGST, sgst: totalPOSGST, igst: totalPOIGST } } };
     }
@@ -3030,14 +3072,22 @@
         const grossMargin = totalRevenue ? (grossProfit / totalRevenue) * 100 : 0;
         const periodLabel = period === 'Weekly' ? `Week of ${formatDate(start)}` : period === 'Monthly' ? `${new Date(year, sub).toLocaleString('en-IN',{month:'long', year:'numeric'})}` : period === 'Quarterly' ? `Q${sub} ${year}` : period === 'Half-Yearly' ? `${sub} ${year}` : `Year ${year}`;
         const detailsRows = profitDetails.map(d => `<tr><td style="padding:6px;">${escapeHtml(d.name)}</td><td style="padding:6px;">${escapeHtml(d.type)}</td><td class="text-right">${d.qty}</td><td class="text-right">${formatCurrency(d.revenue)}</td><td class="text-right">${formatCurrency(d.cogs)}</td><td class="text-right">${formatCurrency(d.profit)}</td><td class="text-right">${d.margin.toFixed(2)}%</td></tr>`).join('');
+        let chartHtml = '';
+        if (profitDetails.length > 0) {
+            chartHtml = `<div class="chart-container"><canvas id="profitChart" width="400" height="200"></canvas></div>`;
+        } else {
+            chartHtml = `<p style="color:#6b7280;">No sales data available for this period.</p>`;
+        }
         const outputHtml = `<h2>Profitability Report: ${periodLabel}</h2><div class="stat-row"><div class="stat-card"><div class="stat-value">${formatCurrency(totalRevenue)}</div><div class="stat-label">Total Sales Revenue</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(totalCOGS)}</div><div class="stat-label">Cost of Goods Sold</div></div><div class="stat-card"><div class="stat-value">${formatCurrency(grossProfit)}</div><div class="stat-label">Gross Profit</div></div><div class="stat-card"><div class="stat-value">${grossMargin.toFixed(2)}%</div><div class="stat-label">Gross Margin</div></div></div>
-        <div class="chart-container"><canvas id="profitChart" width="400" height="200"></canvas></div>
+        ${chartHtml}
         <div class="card"><h3>Profit by Product / Service</h3>${profitDetails.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Type</th><th>Qty Sold</th><th>Revenue</th><th>COGS</th><th>Profit</th><th>Margin</th></tr></thead><tbody>${detailsRows}</tbody></table></div>` : '<p>No sales data in this period.</p>'}</div>`;
         if (renderToDom) {
             document.getElementById('reportOutput').innerHTML = outputHtml;
-            const ctx = document.getElementById('profitChart').getContext('2d');
-            if (currentChart) currentChart.destroy();
-            currentChart = new Chart(ctx, { type: 'pie', data: { labels: profitDetails.map(d => d.name), datasets: [{ data: profitDetails.map(d => d.profit), backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec489a'] }] }, options: { responsive: true, plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${formatCurrency(ctx.raw)}` } } } } });
+            if (profitDetails.length > 0) {
+                const ctx = document.getElementById('profitChart').getContext('2d');
+                if (currentChart) currentChart.destroy();
+                currentChart = new Chart(ctx, { type: 'pie', data: { labels: profitDetails.map(d => d.name), datasets: [{ data: profitDetails.map(d => d.profit), backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec489a'] }] }, options: { responsive: true, plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${formatCurrency(ctx.raw)}` } } } } });
+            }
         }
         return { periodLabel, totalRevenue, totalCOGS, grossProfit, grossMargin, details: profitDetails };
     }
@@ -3229,6 +3279,7 @@
         const products = await dbGetAll('products');
         const customerOptions = customers.map(c => `<option value="${c.id}" ${isEdit && serviceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
         const serialOptions = products.filter(p => p.serialNumber).map(p => `<option value="${escapeHtml(p.serialNumber)}" ${isEdit && serviceData.generatorSerialNumber === p.serialNumber ? 'selected' : ''}>${escapeHtml(p.serialNumber)} (${escapeHtml(p.name)})</option>`).join('');
+        const nextId = await getNextServiceId();
         const modalHtml = `
             <div class="modal-overlay" id="serviceModalOverlay">
                 <div class="modal">
@@ -3236,7 +3287,7 @@
                     <h3>${isEdit ? 'Edit' : 'New'} Service Record</h3>
                     <form id="serviceForm">
                         <div class="form-grid">
-                            <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : await getNextServiceId()}" readonly></div>
+                            <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : nextId}" readonly></div>
                             <div class="form-group"><label>Customer *</label><select id="serviceCustomer" required>${customerOptions}</select></div>
                             <div class="form-group"><label>Generator Serial Number</label>
                                 <input list="serialList" id="serviceSerial" value="${isEdit ? escapeHtml(serviceData.generatorSerialNumber || '') : ''}">
@@ -3354,6 +3405,7 @@
         const products = await dbGetAll('products');
         const customerOptions = customers.map(c => `<option value="${c.id}" ${isEdit && warrantyData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
         const serialOptions = products.filter(p => p.serialNumber).map(p => `<option value="${escapeHtml(p.serialNumber)}" ${isEdit && warrantyData.generatorSerialNumber === p.serialNumber ? 'selected' : ''}>${escapeHtml(p.serialNumber)} (${escapeHtml(p.name)})</option>`).join('');
+        const nextId = await getNextWarrantyId();
         const modalHtml = `
             <div class="modal-overlay" id="warrantyModalOverlay">
                 <div class="modal">
@@ -3361,7 +3413,7 @@
                     <h3>${isEdit ? 'Edit' : 'New'} Warranty</h3>
                     <form id="warrantyForm">
                         <div class="form-grid">
-                            <div class="form-group"><label>Warranty ID</label><input type="text" id="warrantyId" value="${isEdit ? warrantyData.warrantyId : await getNextWarrantyId()}" readonly></div>
+                            <div class="form-group"><label>Warranty ID</label><input type="text" id="warrantyId" value="${isEdit ? warrantyData.warrantyId : nextId}" readonly></div>
                             <div class="form-group"><label>Customer *</label><select id="warrantyCustomer" required>${customerOptions}</select></div>
                             <div class="form-group"><label>Generator Serial Number</label>
                                 <input list="serialListW" id="warrantySerial" value="${isEdit ? escapeHtml(warrantyData.generatorSerialNumber || '') : ''}">
@@ -3417,7 +3469,6 @@
         updateOnlineStatus();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         navigateTo('dashboard');
-        // Start version checking
         scheduleVersionCheck();
     }).catch(err => {
         console.error('IndexedDB error:', err);
