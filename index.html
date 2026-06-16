@@ -1,26 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- Manifest for PWA -->
-<link rel="manifest" href="./manifest.json" />
-<!-- Chart.js with crossOrigin for caching -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111318" />
     <meta name="description" content="GenFin - Generator Sales & Service Business Management" />
     <title>GenFin - Business Manager</title>
-    <!-- Chart.js CDN for enhanced reports & graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-    </script>
-    <!-- Google Identity Services & API Client for Drive Backup -->
-    <script src="https://accounts.google.com/gsi/client">
-    </script>
-    <script src="https://apis.google.com/js/api.js">
-    </script>
+
+    <!-- Manifest for PWA -->
+    <link rel="manifest" href="./manifest.json" />
+
+    <!-- Chart.js with crossOrigin for caching -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+
+    <!-- Google Identity Services & API Client for Drive Backup (NOT cached) -->
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
     <style>
         /* ── Root ──────────────────────────────────────────────────────── */
         :root {
@@ -767,8 +767,7 @@
     <div class="print-area" id="printArea"></div>
 
     <!-- ─── app-core.js ─────────────────────────────────────────────────── -->
-    <script src="app-core.js">
-    </script>
+    <script src="app-core.js"></script>
 
     <!-- ─── Page Color System ───────────────────────────────────────────── -->
     <script>
@@ -980,28 +979,21 @@
             }
 
             // ── Ensure Invoices is loaded as the default page ────────────
-            // If app-core.js exposes a navigate() or similar, we call it.
-            // Otherwise we simulate a click on the Invoices nav item.
             function ensureInvoicesDefault() {
                 const invoicesNav = document.querySelector('.nav-item[data-page="invoices"]');
                 if (invoicesNav) {
-                    // If app-core.js uses a custom event or global, try that first
                     if (window.__navigateTo) {
                         window.__navigateTo('invoices');
                         return;
                     }
-                    // If app-core.js listens for nav clicks, trigger one
-                    // but only if the page isn't already loaded
                     const currentPage = mainContent.dataset.activePage;
                     if (currentPage !== 'invoices') {
                         invoicesNav.click();
                     }
-                    // Ensure colors are applied
                     applyPageColors('invoices');
                 }
             }
 
-            // Run after app-core.js has had a chance to render
             setTimeout(ensureInvoicesDefault, 200);
 
             console.log('🎨 Page Color System ready – Invoices is the new default home (Dashboard removed)');
