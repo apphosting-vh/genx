@@ -6,6 +6,7 @@
 // PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
 // PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
 // PATCH: Removed dynamic navigation injection (now static in index.html)
+// PATCH: Fixed "Failed to execute 'json' on 'Response': body stream already read" by avoiding double reads
 
 (function() {
     'use strict';
@@ -708,6 +709,7 @@
 
             let response;
             let uploadSuccess = false;
+            let alreadyHandled = false; // flag to avoid double reading response
 
             try {
                 response = await withTokenRetry(async () => {
@@ -760,25 +762,21 @@
                     });
                     response = retryRes;
                     uploadSuccess = true;
-                    // Update lastBackupFileId to the new file
+                    // Read the response once and store the ID
                     const result = await response.json();
                     lastBackupFileId = result.id;
-                    // Update the view backup link with the new file
                     updateViewBackupLink(lastBackupFileId);
                     console.log('Created new backup file with ID:', lastBackupFileId);
+                    // Mark as handled so we don't read again
+                    alreadyHandled = true;
                 } else {
                     throw err;
                 }
             }
 
-            // If we successfully uploaded and it was a PATCH, get the result
-            if (uploadSuccess && method === 'PATCH') {
-                const result = await response.json();
-                lastBackupFileId = result.id;
-                updateViewBackupLink(lastBackupFileId);
-            } else if (uploadSuccess && method === 'POST' && !lastBackupFileId) {
-                // For POST, we already set lastBackupFileId above
-                // But if we didn't (e.g., initial upload), get it from response
+            // If we successfully uploaded and we haven't already handled the response,
+            // read the file ID from the response (for PATCH or initial POST)
+            if (uploadSuccess && !alreadyHandled) {
                 const result = await response.json();
                 lastBackupFileId = result.id;
                 updateViewBackupLink(lastBackupFileId);
