@@ -5,6 +5,7 @@
 // + Reset & Delete Data, Daily Backup Status, Auto-backup default 4h enabled, Inventory Type column,
 // GST 0% fix, View modal table header fix, File System Access API for local disk sync
 // + Production-grade service worker with PWA support
+// + Product transaction view (Invoices & Purchase Orders linked to inventory items)
 
 (function() {
     'use strict';
@@ -2527,7 +2528,7 @@
         } catch(err) { showToast('Error opening supplier form', 'error'); }
     }
 
-    // ---------- Products (Enhanced) ----------
+    // ---------- Products (Enhanced) + View Transactions ----------
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
@@ -2565,6 +2566,7 @@
                         <td><span class="status-badge ${statusClass}">${status}</span></td>
                         <td>
                             <button class="btn btn-outline btn-sm edit-product" data-id="${p.id}">Edit</button>
+                            <button class="btn btn-info btn-sm view-transactions" data-id="${p.id}" style="background:#0ea5e9; color:white; border-color:#0ea5e9;">Transactions</button>
                             <button class="btn btn-danger btn-sm delete-product" data-id="${p.id}">Del</button>
                         </td>
                     </tr>`;
@@ -2575,6 +2577,12 @@
                 document.getElementById('addProductBtn')?.addEventListener('click', () => showProductModal());
                 document.querySelectorAll('.edit-product').forEach(b => b.addEventListener('click', async () => { const p = await dbGetById('products', Number(b.dataset.id)); showProductModal(p); }));
                 document.querySelectorAll('.delete-product').forEach(b => b.addEventListener('click', async () => { await dbDelete('products', Number(b.dataset.id)); await renderProducts(); }));
+                document.querySelectorAll('.view-transactions').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const productId = Number(btn.dataset.id);
+                        showProductTransactions(productId);
+                    });
+                });
             };
             const apply = () => {
                 searchTerm = document.getElementById('prodSearch').value.trim().toLowerCase();
@@ -2592,6 +2600,120 @@
             renderTable();
             setTimeout(() => { document.getElementById('applyProdSearch')?.addEventListener('click', apply); document.getElementById('clearProdSearch')?.addEventListener('click', clear); }, 0);
         } catch(err) { showToast('Failed to load inventory', 'error'); }
+    }
+
+    // ---- Show Product Transactions Modal ----
+    async function showProductTransactions(productId) {
+        try {
+            const product = await dbGetById('products', productId);
+            if (!product) {
+                showToast('Product not found', 'error');
+                return;
+            }
+            const invoices = await dbGetAll('invoices');
+            const purchaseOrders = await dbGetAll('purchaseOrders');
+            const customers = await dbGetAll('customers');
+            const suppliers = await dbGetAll('suppliers');
+            const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
+            const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
+
+            // Find related invoices
+            const relatedInvoices = invoices.filter(inv => 
+                inv.items && inv.items.some(item => Number(item.productId) === productId)
+            );
+            // Find related POs
+            const relatedPOs = purchaseOrders.filter(po => 
+                po.items && po.items.some(item => Number(item.productId) === productId)
+            );
+
+            const modalContent = `
+                <div class="modal-overlay" id="productTransactionsModal">
+                    <div class="modal" style="max-width: 900px;">
+                        <button class="modal-close" id="closeProductTransactionsModal">✕</button>
+                        <h3>Transactions for: ${escapeHtml(product.name)}</h3>
+                        <p style="color: #6b7280; margin-bottom: 16px;">SKU: ${escapeHtml(product.sku || 'N/A')} | Brand: ${escapeHtml(product.brand || 'N/A')}</p>
+
+                        <h4 style="margin-top: 16px;">📄 Invoices</h4>
+                        ${relatedInvoices.length ? `
+                            <div class="table-wrap">
+                                <table>
+                                    <thead><tr style="${TABLE_HEADER_STYLE}">
+                                        <th>Invoice #</th><th>Date</th><th>Customer</th><th>Total</th><th>Status</th><th>Actions</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        ${relatedInvoices.map(inv => `
+                                            <tr>
+                                                <td>${escapeHtml(inv.invoiceNumber)}</td>
+                                                <td>${formatDate(inv.date)}</td>
+                                                <td>${escapeHtml(customerMap[inv.customerId] || '')}</td>
+                                                <td>${formatCurrency(inv.grandTotal)}</td>
+                                                <td><span class="badge ${inv.paymentStatus === 'Paid' ? 'badge-paid' : (inv.paymentStatus === 'Overdue' ? 'badge-overdue' : 'badge-pending')}">${inv.paymentStatus || 'Unpaid'}</span></td>
+                                                <td><button class="btn btn-outline btn-sm view-invoice" data-id="${inv.id}">View</button></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `<p style="color: #6b7280;">No invoices found for this product.</p>`}
+
+                        <h4 style="margin-top: 24px;">📦 Purchase Orders</h4>
+                        ${relatedPOs.length ? `
+                            <div class="table-wrap">
+                                <table>
+                                    <thead><tr style="${TABLE_HEADER_STYLE}">
+                                        <th>PO #</th><th>Date</th><th>Supplier</th><th>Total</th><th>Status</th><th>Actions</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        ${relatedPOs.map(po => `
+                                            <tr>
+                                                <td>${escapeHtml(po.poNumber)}</td>
+                                                <td>${formatDate(po.date)}</td>
+                                                <td>${escapeHtml(supplierMap[po.supplierId] || '')}</td>
+                                                <td>${formatCurrency(po.grandTotal)}</td>
+                                                <td>${po.status}</td>
+                                                <td><button class="btn btn-outline btn-sm view-po" data-id="${po.id}">View</button></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `<p style="color: #6b7280;">No purchase orders found for this product.</p>`}
+                        <div style="text-align:right; margin-top:16px;">
+                            <button class="btn btn-outline" id="closeProductTransactionsBtn">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const modalContainer = document.getElementById('modalContainer');
+            modalContainer.innerHTML = modalContent;
+
+            const closeModal = () => { modalContainer.innerHTML = ''; };
+            document.getElementById('closeProductTransactionsModal').addEventListener('click', closeModal);
+            document.getElementById('closeProductTransactionsBtn').addEventListener('click', closeModal);
+            document.getElementById('productTransactionsModal').addEventListener('click', e => {
+                if (e.target === e.currentTarget) closeModal();
+            });
+
+            // Attach view events for invoices and POs inside the modal
+            document.querySelectorAll('#productTransactionsModal .view-invoice').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = Number(btn.dataset.id);
+                    closeModal();
+                    showInvoiceViewModal(id);
+                });
+            });
+            document.querySelectorAll('#productTransactionsModal .view-po').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = Number(btn.dataset.id);
+                    closeModal();
+                    showPOViewModal(id);
+                });
+            });
+
+        } catch (err) {
+            showToast('Error loading transactions: ' + err.message, 'error');
+            console.error(err);
+        }
     }
 
     async function showProductModal(prodData = null) {
