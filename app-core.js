@@ -2,6 +2,8 @@
 // WITH APP VERSION CHECK AND DYNAMIC UPDATE
 // Daily backup check, persistent OAuth, folder caching, upsert backup, disconnect, refined UI,
 // sync status indicator, retry-on-401, smart auto-backup, service & warranty, product inventory
+// + Reset & Delete Data, Daily Backup Status, Auto-backup default 4h enabled, Inventory Type column,
+// GST 0% fix, View modal table header fix
 
 (function() {
     'use strict';
@@ -1055,6 +1057,8 @@
             `;
             if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
             if (authBtn) authBtn.textContent = 'Connect to Google Drive';
+            // Update daily backup status
+            updateDailyBackupStatus();
         } else {
             authPanel.style.display = 'block';
             actionsDiv.style.display = 'none';
@@ -1067,6 +1071,8 @@
                     authBtn.textContent = 'Connect to Google Drive';
                 }
             }
+            const dailyStatus = document.getElementById('dailyBackupStatus');
+            if (dailyStatus) dailyStatus.textContent = 'Not connected';
         }
         updateGlobalSyncIndicator();
     }
@@ -1080,6 +1086,31 @@
         if (!syncState.lastSuccessAt && localStorage.getItem('genfin_last_backup')) {
             syncState.lastSuccessAt = localStorage.getItem('genfin_last_backup');
             saveSyncPersist();
+        }
+    }
+
+    // ---- Daily Backup Status (Drive) ----
+    async function updateDailyBackupStatus() {
+        const statusEl = document.getElementById('dailyBackupStatus');
+        if (!statusEl) return;
+        if (!accessToken) {
+            statusEl.textContent = 'Not connected';
+            return;
+        }
+        try {
+            const meta = await getLatestBackupMetadata();
+            if (meta && meta.modifiedTime) {
+                const d = new Date(meta.modifiedTime);
+                statusEl.textContent = '✅ ' + d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                statusEl.style.color = '#10b981';
+            } else {
+                statusEl.textContent = 'No backup found in Drive';
+                statusEl.style.color = '#f59e0b';
+            }
+        } catch (err) {
+            console.warn('Daily backup status error:', err);
+            statusEl.textContent = '⚠️ Could not fetch';
+            statusEl.style.color = '#ef4444';
         }
     }
 
@@ -1120,13 +1151,17 @@
     // ---- Auto-backup scheduling ----
     let autoBackupInterval = null;
     let backupDebounceTimer = null;
-    let backupFrequency = 30;
+    let backupFrequency = 240; // Default: 4 hours
 
     function loadBackupFrequency() {
         const stored = localStorage.getItem('gdrive_backup_frequency');
         if (stored) {
             const val = parseInt(stored);
             if (val > 0) backupFrequency = val;
+        } else {
+            // Default to 4 hours (240 min) if no stored value
+            backupFrequency = 240;
+            localStorage.setItem('gdrive_backup_frequency', '240');
         }
     }
     loadBackupFrequency();
@@ -1137,7 +1172,7 @@
     }
 
     function scheduleAutoBackup() {
-        const autoEnabled = localStorage.getItem('gdrive_auto_backup') === 'true';
+        const autoEnabled = localStorage.getItem('gdrive_auto_backup') !== 'false'; // default true
         const connected = accessToken != null;
         if (!autoEnabled || !connected) {
             stopAutoBackup();
@@ -1258,6 +1293,9 @@
         } else if (viewLink) {
             viewLink.style.display = 'none';
         }
+
+        // Update daily backup status
+        updateDailyBackupStatus();
     }
 
     // ---------- Business Profile ----------
@@ -1322,6 +1360,7 @@
         return { intra: isIntra, cgst: isIntra ? 9 : 0, sgst: isIntra ? 9 : 0, igst: isIntra ? 0 : 18 };
     }
 
+    // FIX: GST 0% bug - use nullish coalescing instead of OR to preserve 0 value
     function applyDiscountAndRecalcTaxes(itemsRaw, discount, stateOfSupply, partyState, products) {
         const itemsWithBase = itemsRaw.map(it => {
             const prod = products.find(p => p.id == it.productId) || {};
@@ -1331,7 +1370,8 @@
                 originalTaxable,
                 description: prod.name || 'Unknown Item',
                 hsn: prod.hsnSacCode || '',
-                selectedGstRate: it.selectedGstRate || 18
+                // FIX: Use nullish coalescing to preserve 0% GST rate
+                selectedGstRate: it.selectedGstRate !== undefined && it.selectedGstRate !== null ? it.selectedGstRate : 18
             };
         });
         
@@ -1565,12 +1605,14 @@
         const selectedProductId = item ? item.productId : (products[0]?.id || '');
         const productOptions = products.length ? products.map(p => `<option value="${p.id}" ${p.id == selectedProductId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.type || 'Product'})</option>`).join('') : '<option disabled>No products found</option>';
         const rateValue = (item && item.rate) ? item.rate : '';
+        // FIX: selected GST rate should use the item's rate, with 0 as valid
+        const selectedGst = item && item.selectedGstRate !== undefined ? item.selectedGstRate : 18;
         return `
             <div class="invoice-item-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
                 <select class="item-product" style="flex:2; min-width:120px;">${productOptions}</select>
                 <input type="number" class="item-qty" placeholder="Qty" value="${item ? item.qty : 1}" step="1" style="width:70px;">
                 <input type="number" class="item-rate" placeholder="Rate" value="${rateValue}" step="0.01" style="width:90px;">
-                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}">${s}%</option>`).join('')}</select>
+                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}" ${s === selectedGst ? 'selected' : ''}>${s}%</option>`).join('')}</select>
                 <button type="button" class="btn btn-danger btn-xs remove-item-row">✕</button>
             </div>
         `;
@@ -1580,12 +1622,13 @@
         const selectedProductId = item ? item.productId : (products[0]?.id || '');
         const productOptions = products.length ? products.map(p => `<option value="${p.id}" ${p.id == selectedProductId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.type || 'Product'})</option>`).join('') : '<option disabled>No products found</option>';
         const rateValue = (item && item.rate) ? item.rate : '';
+        const selectedGst = item && item.selectedGstRate !== undefined ? item.selectedGstRate : 18;
         return `
             <div class="po-item-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
                 <select class="item-product" style="flex:2; min-width:120px;">${productOptions}</select>
                 <input type="number" class="item-qty" value="${item ? item.qty : 1}" step="1" style="width:70px;">
                 <input type="number" class="item-rate" value="${rateValue}" step="0.01" style="width:90px;">
-                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}">${s}%</option>`).join('')}</select>
+                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}" ${s === selectedGst ? 'selected' : ''}>${s}%</option>`).join('')}</select>
                 <button type="button" class="btn btn-danger btn-xs remove-row">✕</button>
             </div>
         `;
@@ -1696,6 +1739,7 @@
         }
     }
 
+    // FIX: View Invoice Modal - table headers with black text on white background
     async function showInvoiceViewModal(id) {
         try {
             const inv = await dbGetById('invoices', id);
@@ -1712,8 +1756,21 @@
                     <h3>Invoice: ${escapeHtml(inv.invoiceNumber)}</h3>
                     <p>Date: ${formatDate(inv.date)} &nbsp; | &nbsp; Due Date: ${formatDate(inv.dueDate)} &nbsp; | &nbsp; Payment Terms: ${escapeHtml(inv.paymentTerms)}<br>
                     Customer: ${escapeHtml(customer.name || 'N/A')} &nbsp; | &nbsp; GSTIN: ${escapeHtml(customer.gstin || 'N/A')}</p>
-                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse;">
-                        <thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Rate</th><th>GST</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
+                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; background:#fff;">
+                        <thead>
+                            <tr style="background:#f1f5f9; color:#111827;">
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Item</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">HSN</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Qty</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Rate</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">GST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Taxable</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">CGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">SGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">IGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Total</th>
+                            </tr>
+                        </thead>
                         <tbody>${inv.items.map(i => `<tr><td style="padding:6px;">${escapeHtml(i.description)}</td><td style="padding:6px;">${escapeHtml(i.hsn)}</td><td style="padding:6px; text-align:right;">${i.qty}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.rate)}</td><td style="padding:6px; text-align:center;">${i.selectedGstRate}%</td><td style="padding:6px; text-align:right;">${formatCurrency(i.taxable)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.cgstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.sgstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.igstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.total)}</td></tr>`).join('')}</tbody>
                     </table>
                     <p style="text-align:right;">Subtotal: ${formatCurrency(inv.subtotal)}<br>Discount: ${formatCurrency(inv.subtotal - inv.items.reduce((s,i)=>s+i.taxable,0))}<br>Total Tax: ${formatCurrency(inv.totalTax)}<br><strong>Grand Total: ${formatCurrency(inv.grandTotal)}</strong></p>
@@ -1784,7 +1841,7 @@
                         .info-box { width: 48%; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; background: #f9fafb; }
                         .info-box strong { display: block; margin-bottom: 5px; color: #4f46e5; }
                         table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px; }
-                        th { background: #f3f4f6; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #e5e7eb; }
+                        th { background: #f3f4f6; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #e5e7eb; color: #111827; }
                         td { padding: 8px; border: 1px solid #e5e7eb; text-align: left; }
                         .text-right { text-align: right; }
                         .text-center { text-align: center; }
@@ -1922,7 +1979,7 @@
                     const productId = row.querySelector('.item-product').value;
                     const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
                     const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
-                    const gst = parseFloat(row.querySelector('.item-gst').value) || 18;
+                    const gst = parseFloat(row.querySelector('.item-gst').value) || 0;
                     items.push({ productId, qty, rate, selectedGstRate: gst });
                 });
                 const customerId = Number(customerSelect.value);
@@ -1967,7 +2024,7 @@
                             productId: row.querySelector('.item-product').value,
                             qty: parseFloat(row.querySelector('.item-qty').value) || 0,
                             rate: parseFloat(row.querySelector('.item-rate').value) || 0,
-                            selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 18
+                            selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 0
                         });
                     });
                     const customer = customers.find(c => c.id === customerId);
@@ -2056,6 +2113,7 @@
         try { const po = await dbGetById('purchaseOrders', id); if (!po) return; po.status = newStatus; await dbPut('purchaseOrders', po); showToast(`PO status updated to ${newStatus}`, 'success'); await renderPurchaseOrders(); } catch(err) { showToast('Error updating PO status', 'error'); }
     }
 
+    // FIX: View PO Modal - table headers with black text on white background
     async function showPOViewModal(id) {
         try {
             const po = await dbGetById('purchaseOrders', id);
@@ -2070,8 +2128,22 @@
                     <p>${escapeHtml(profile.address)}, ${escapeHtml(profile.city)}, ${escapeHtml(profile.state)} - ${escapeHtml(profile.pincode)}<br>GSTIN: ${escapeHtml(profile.gstin)}</p>
                     <hr><h3>Purchase Order: ${escapeHtml(po.poNumber)}</h3>
                     <p>Date: ${formatDate(po.date)}<br>Supplier: ${escapeHtml(supplier.name || 'N/A')} &nbsp; | &nbsp; GSTIN: ${escapeHtml(supplier.gstin || 'N/A')}</p>
-                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse;"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>GST</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
-                    <tbody>${po.items.map(i => `<tr><td>${escapeHtml(i.description)}</td><td class="text-right">${i.qty}</td><td class="text-right">${formatCurrency(i.rate)}</td><td class="text-center">${i.selectedGstRate}%</td><td class="text-right">${formatCurrency(i.taxable)}</td><td class="text-right">${formatCurrency(i.cgstAmt)}</td><td class="text-right">${formatCurrency(i.sgstAmt)}</td><td class="text-right">${formatCurrency(i.igstAmt)}</td><td class="text-right">${formatCurrency(i.total)}</td></tr>`).join('')}</tbody></table>
+                    <table border="1" cellpadding="6" style="width:100%; border-collapse:collapse; background:#fff;">
+                        <thead>
+                            <tr style="background:#f1f5f9; color:#111827;">
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Item</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Qty</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Rate</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">GST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Taxable</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">CGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">SGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">IGST</th>
+                                <th style="background:#f1f5f9; color:#111827; padding:8px;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>${po.items.map(i => `<tr><td style="padding:6px;">${escapeHtml(i.description)}</td><td style="padding:6px; text-align:right;">${i.qty}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.rate)}</td><td style="padding:6px; text-align:center;">${i.selectedGstRate}%</td><td style="padding:6px; text-align:right;">${formatCurrency(i.taxable)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.cgstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.sgstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.igstAmt)}</td><td style="padding:6px; text-align:right;">${formatCurrency(i.total)}</td></tr>`).join('')}</tbody>
+                    </table>
                     <p style="text-align:right;">Subtotal: ${formatCurrency(po.subtotal)}<br>Discount: ${formatCurrency(po.discount)}<br>Total Tax: ${formatCurrency(po.totalTax)}<br><strong>Grand Total: ${formatCurrency(po.grandTotal)}</strong></p>
                     <div style="margin-top:12px;"><label>Status:</label><select id="viewPOStatusSelect">${statusOptions}</select><button class="btn btn-primary btn-sm" id="updateViewPOStatusBtn">Update Status</button></div>
                 </div>
@@ -2110,7 +2182,7 @@
                     .info-box { width: 48%; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; background: #f9fafb; }
                     .info-box strong { display: block; margin-bottom: 5px; color: #4f46e5; }
                     table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px; }
-                    th { background: #f3f4f6; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #e5e7eb; }
+                    th { background: #f3f4f6; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #e5e7eb; color: #111827; }
                     td { padding: 8px; border: 1px solid #e5e7eb; text-align: left; }
                     .text-right { text-align: right; }
                     .text-center { text-align: center; }
@@ -2198,7 +2270,7 @@
                     const productId = row.querySelector('.item-product').value;
                     const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
                     const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
-                    const gst = parseFloat(row.querySelector('.item-gst').value) || 18;
+                    const gst = parseFloat(row.querySelector('.item-gst').value) || 0;
                     items.push({ productId, qty, rate, selectedGstRate: gst });
                 });
                 const supplierId = Number(supplierSelect.value);
@@ -2242,7 +2314,7 @@
                             productId: row.querySelector('.item-product').value,
                             qty: parseFloat(row.querySelector('.item-qty').value) || 0,
                             rate: parseFloat(row.querySelector('.item-rate').value) || 0,
-                            selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 18
+                            selectedGstRate: parseFloat(row.querySelector('.item-gst').value) || 0
                         });
                     });
                     const supplier = suppliers.find(s => s.id === supplierId);
@@ -2448,7 +2520,7 @@
     }
 
     // ---------- Products (Enhanced) ----------
-    // Renamed to "Inventory" in the UI. The page title and button texts are changed.
+    // Renamed to "Inventory" in the UI. Type column added as first column.
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
@@ -2461,7 +2533,8 @@
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
-                    <th>SKU</th><th>Name</th><th>Brand</th><th>Model</th><th>Category</th><th>Capacity (KVA)</th><th>Sell Price</th><th>Stock</th><th>Status</th><th>Actions</th>
+                    <!-- Type column added as first column -->
+                    <th>Type</th><th>SKU</th><th>Name</th><th>Brand</th><th>Model</th><th>Category</th><th>Capacity (KVA)</th><th>Sell Price</th><th>Stock</th><th>Status</th><th>Actions</th>
                 </tr></thead><tbody>`;
                 filteredProducts.forEach(p => {
                     let status = p.status || 'In Stock';
@@ -2474,6 +2547,7 @@
                                        status === 'Low Stock' ? 'status-low-stock' :
                                        status === 'Out of Stock' ? 'status-out-of-stock' : 'status-discontinued';
                     html += `<tr>
+                        <td><span class="badge" style="background:#eef2ff;color:#4f46e5;font-size:0.7rem;">${escapeHtml(p.type || 'Product')}</span></td>
                         <td>${escapeHtml(p.sku || '')}</td>
                         <td>${escapeHtml(p.name)}</td>
                         <td>${escapeHtml(p.brand || '')}</td>
@@ -2489,7 +2563,7 @@
                         </td>
                     </tr>`;
                 });
-                if (!filteredProducts.length) html += `<tr><td colspan="10" class="empty-state">No items found.</td></tr>`;
+                if (!filteredProducts.length) html += `<tr><td colspan="11" class="empty-state">No items found.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addProductBtn')?.addEventListener('click', () => showProductModal());
@@ -2651,7 +2725,57 @@
         });
     }
 
-    // ---------- SETTINGS: Backup & Restore + Google Drive ----------
+    // ---------- Reset & Delete Data ----------
+    async function resetAllData() {
+        const confirmMsg = '⚠️ WARNING: This will permanently DELETE ALL data including customers, suppliers, products, invoices, POs, expenses, service records, warranties, and all settings.\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to proceed?';
+        if (!confirm(confirmMsg)) {
+            showToast('Reset cancelled', 'info');
+            return;
+        }
+        const secondConfirm = 'Type "DELETE ALL" to confirm:';
+        const userInput = prompt(secondConfirm);
+        if (userInput !== 'DELETE ALL') {
+            showToast('Reset cancelled - confirmation text did not match', 'info');
+            return;
+        }
+        try {
+            showToast('Resetting all data...', 'info');
+            _suppressAutoBackup = true;
+            // Clear all stores
+            for (const storeName of stores) {
+                await dbClearStore(storeName);
+            }
+            // Reset counters
+            await dbSetSetting('nextInvoiceNumber', 1);
+            await dbSetSetting('nextPONumber', 1);
+            await dbSetSetting('nextServiceId', 1);
+            await dbSetSetting('nextWarrantyId', 1);
+            // Reset profile to default
+            saveProfile({ ...defaultProfile });
+            // Clear local storage sync data
+            localStorage.removeItem('genfin_last_success');
+            localStorage.removeItem('genfin_last_attempt');
+            localStorage.removeItem('genfin_last_error');
+            localStorage.removeItem('genfin_last_backup');
+            // Reset sync state
+            syncState.lastSuccessAt = null;
+            syncState.lastAttemptAt = null;
+            syncState.lastError = null;
+            syncState.errorToastShown = false;
+            syncState.recoveryToastShown = false;
+            saveSyncPersist();
+            showToast('✅ All data has been reset successfully.', 'success');
+            navigateTo('dashboard');
+        } catch (err) {
+            console.error('Reset error:', err);
+            showToast('Error during reset: ' + err.message, 'error');
+        } finally {
+            _suppressAutoBackup = false;
+            scheduleAutoBackup();
+        }
+    }
+
+    // ---------- SETTINGS: Backup & Restore + Google Drive + Reset ----------
     async function renderSettings() {
         createSyncIndicator();
         updateGlobalSyncIndicator();
@@ -2688,6 +2812,10 @@
                             <button class="btn btn-danger" id="gdriveDisconnectBtn" style="display:none;">Disconnect</button>
                             <button class="btn btn-warning" id="gdriveReconnectBtn" style="display:none;">Reconnect</button>
                         </div>
+                        <!-- Daily Backup Status -->
+                        <div style="margin-top: 10px; font-size:0.85rem; background:#f0fdf4; padding:8px 12px; border-radius:6px; border-left:3px solid #10b981;">
+                            <strong>📅 Daily Backup Status:</strong> <span id="dailyBackupStatus">Not connected</span>
+                        </div>
                     </div>
                     <div style="background: #f9fafb; padding: 12px; border-radius: 8px;">
                         <div style="font-size:0.85rem;">
@@ -2698,15 +2826,15 @@
                                 <label style="font-weight:600;">Auto backup frequency:</label>
                                 <select id="backupFrequencySelect" style="margin-left: 6px; padding: 4px;">
                                     <option value="15">15 min</option>
-                                    <option value="30" selected>30 min</option>
+                                    <option value="30">30 min</option>
                                     <option value="60">1 hour</option>
                                     <option value="120">2 hours</option>
-                                    <option value="240">4 hours</option>
+                                    <option value="240" selected>4 hours</option>
                                 </select>
                             </div>
                             <div style="margin-top: 6px;">
                                 <label>
-                                    <input type="checkbox" id="gdriveAutoBackup"> Enable automatic backup
+                                    <input type="checkbox" id="gdriveAutoBackup" checked> Enable automatic backup
                                 </label>
                             </div>
                             <div style="margin-top: 6px;">
@@ -2721,6 +2849,13 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Reset & Delete Data -->
+            <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
+                <h3 style="color: #dc2626;">⚠️ Reset & Delete Data</h3>
+                <p style="color: #6b7280; margin-bottom: 12px;">Permanently erase all business data and reset the app to a fresh state. This action cannot be undone.</p>
+                <button class="btn btn-danger" id="resetDataBtn">🗑️ Delete All Data & Reset</button>
             </div>
         `;
 
@@ -2753,14 +2888,14 @@
 
         const freqSelect = document.getElementById('backupFrequencySelect');
         if (freqSelect) {
-            const current = localStorage.getItem('gdrive_backup_frequency') || '30';
+            const current = localStorage.getItem('gdrive_backup_frequency') || '240';
             freqSelect.value = current;
             freqSelect.addEventListener('change', (e) => {
                 const val = parseInt(e.target.value);
                 if (val > 0) {
                     localStorage.setItem('gdrive_backup_frequency', String(val));
                     backupFrequency = val;
-                    if (localStorage.getItem('gdrive_auto_backup') === 'true' && accessToken) {
+                    if (localStorage.getItem('gdrive_auto_backup') !== 'false' && accessToken) {
                         scheduleAutoBackup();
                     }
                 }
@@ -2769,7 +2904,9 @@
 
         const autoCheck = document.getElementById('gdriveAutoBackup');
         if (autoCheck) {
-            autoCheck.checked = localStorage.getItem('gdrive_auto_backup') === 'true';
+            // Default to true if not explicitly set to false
+            const stored = localStorage.getItem('gdrive_auto_backup');
+            autoCheck.checked = stored !== 'false';
             autoCheck.addEventListener('change', (e) => {
                 localStorage.setItem('gdrive_auto_backup', e.target.checked);
                 if (e.target.checked && accessToken) {
@@ -2782,6 +2919,12 @@
             });
         }
 
+        // Reset button
+        const resetBtn = document.getElementById('resetDataBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', resetAllData);
+        }
+
         updateDriveUI(!!accessToken);
         updateLastBackupUI();
         updateSettingsUI();
@@ -2790,6 +2933,7 @@
             if (lastBackupFileId) {
                 updateViewBackupLink(lastBackupFileId);
             }
+            updateDailyBackupStatus();
         }
     }
 
