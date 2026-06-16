@@ -20,6 +20,13 @@
 
     const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
 
+    // ---------- Constants for dropdowns (FIX: missing definitions) ----------
+    const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue'];
+    const PAYMENT_TERMS = ['Immediate', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
+    const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
+    const PRODUCT_TYPES = ['Generator', 'Accessory', 'Spare Part', 'Service'];
+    const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
+
     // Global flag to suppress auto-backup during restore
     let _suppressAutoBackup = false;
 
@@ -1816,6 +1823,36 @@
         }
     }
 
+    // ---------- Helper row functions for invoice/PO item rows (FIX: missing definitions) ----------
+    function invoiceItemRow(item, idx, products) {
+        const productOptions = products.map(p => `<option value="${p.id}" ${item && item.productId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+        const qty = item ? item.qty : 1;
+        const rate = item ? item.rate : 0;
+        const gst = item ? item.selectedGstRate : 18;
+        return `<div class="invoice-item-row" style="display:flex; gap:8px; margin-bottom:8px; align-items:end; flex-wrap:wrap;">
+            <div class="form-group" style="flex:2; min-width:120px;"><label>Product</label><select class="item-product" style="width:100%;">${productOptions}</select></div>
+            <div class="form-group" style="flex:1; min-width:70px;"><label>Qty</label><input type="number" class="item-qty" value="${qty}" step="1" min="1" style="width:100%;"></div>
+            <div class="form-group" style="flex:1; min-width:80px;"><label>Rate (₹)</label><input type="number" class="item-rate" value="${rate}" step="0.01" min="0" style="width:100%;"></div>
+            <div class="form-group" style="flex:1; min-width:70px;"><label>GST %</label><select class="item-gst" style="width:100%;">${[0,5,12,18,28].map(g => `<option value="${g}" ${g == gst ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
+            <button type="button" class="btn btn-danger btn-sm remove-item-row" style="margin-bottom:2px;">✕</button>
+        </div>`;
+    }
+
+    function poItemRow(item, idx, products) {
+        const productOptions = products.map(p => `<option value="${p.id}" ${item && item.productId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+        const qty = item ? item.qty : 1;
+        const rate = item ? item.rate : 0;
+        const gst = item ? item.selectedGstRate : 18;
+        return `<div class="po-item-row" style="display:flex; gap:8px; margin-bottom:8px; align-items:end; flex-wrap:wrap;">
+            <div class="form-group" style="flex:2; min-width:120px;"><label>Product</label><select class="item-product" style="width:100%;">${productOptions}</select></div>
+            <div class="form-group" style="flex:1; min-width:70px;"><label>Qty</label><input type="number" class="item-qty" value="${qty}" step="1" min="1" style="width:100%;"></div>
+            <div class="form-group" style="flex:1; min-width:80px;"><label>Rate (₹)</label><input type="number" class="item-rate" value="${rate}" step="0.01" min="0" style="width:100%;"></div>
+            <div class="form-group" style="flex:1; min-width:70px;"><label>GST %</label><select class="item-gst" style="width:100%;">${[0,5,12,18,28].map(g => `<option value="${g}" ${g == gst ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
+            <button type="button" class="btn btn-danger btn-sm remove-row" style="margin-bottom:2px;">✕</button>
+        </div>`;
+    }
+
+    // ----- Invoice Modal -----
     async function showInvoiceModal(invoiceData = null) {
         try {
             const customers = await dbGetAll('customers');
@@ -2188,7 +2225,8 @@
                     if (product) {
                         const rateInput = row.querySelector('.item-rate');
                         const gstSelect = row.querySelector('.item-gst');
-                        rateInput.value = product.costPrice || 0;
+                        // FIX: use purchasePrice instead of costPrice
+                        rateInput.value = product.purchasePrice || 0;
                         const gstValue = product.gstRate || 18;
                         if ([...gstSelect.options].some(opt => opt.value == gstValue)) gstSelect.value = gstValue;
                         else gstSelect.value = 18;
@@ -2275,7 +2313,7 @@
                 if (product) {
                     const rateInput = row.querySelector('.item-rate');
                     const gstSelect = row.querySelector('.item-gst');
-                    if (!rateInput.value || rateInput.value == 0) rateInput.value = product.costPrice || 0;
+                    if (!rateInput.value || rateInput.value == 0) rateInput.value = product.purchasePrice || 0;
                     if (!gstSelect.value || gstSelect.value == 18) {
                         const gstValue = product.gstRate || 18;
                         if ([...gstSelect.options].some(opt => opt.value == gstValue)) gstSelect.value = gstValue;
