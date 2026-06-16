@@ -7,6 +7,7 @@
 // PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
 // PATCH: Removed dynamic navigation injection (now static in index.html)
 // PATCH: Fixed "Failed to execute 'json' on 'Response': body stream already read" by avoiding double reads
+// ENHANCEMENT: Automatic daily backup check on app start and on online event
 
 (function() {
     'use strict';
@@ -157,6 +158,7 @@
     let initPromise = null; // for concurrency control
     let isRefreshing = false; // prevent concurrent refreshes
     let popupBlocked = false; // track if popup was blocked
+    let isDailyBackupRunning = false; // prevent concurrent daily checks
 
     const GD_CLIENT_ID = '769525551930-5d645morj103efjqp7baq95b3629k38h.apps.googleusercontent.com';
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -314,6 +316,8 @@
         scheduleAutoBackup();
         // Fetch email again in background, but ignore errors
         fetchDriveUserEmail().catch(() => {});
+        // Trigger daily backup check after a short delay
+        setTimeout(() => performDailyBackupCheck(), 5000);
     }
 
     async function loadDriveToken() {
@@ -386,10 +390,13 @@
                         setSyncState('idle');
                         scheduleAutoBackup();
                         console.log('Drive token restored from DB');
+                        // Trigger daily backup check after a short delay
+                        setTimeout(() => performDailyBackupCheck(), 5000);
                     } else {
                         console.log('Drive token expired – attempting silent refresh');
                         if (tokenClient) {
                             await refreshAccessToken();
+                            // After refresh, token is saved and daily check will be triggered inside saveDriveToken
                         } else {
                             throw new Error('tokenClient not ready');
                         }
@@ -485,6 +492,7 @@
                             showToast('Connected to Google Drive', 'success');
                             // Fetch email again after token is saved (background)
                             fetchDriveUserEmail().catch(() => {});
+                            // Trigger daily backup check (already called inside saveDriveToken)
                         } catch (e) {
                             // If anything fails, still try to save the token
                             try {
@@ -639,6 +647,30 @@
         } catch (err) {
             // If we can't list files (e.g., 403), return null so we try to create a new one
             console.warn('getLatestBackupFileId error:', err);
+            return null;
+        }
+    }
+
+    /**
+     * Get the latest backup file metadata (including modifiedTime)
+     */
+    async function getLatestBackupMetadata() {
+        if (!accessToken) return null;
+        try {
+            const folderId = await ensureBackupFolder();
+            const response = await withTokenRetry(() =>
+                gapi.client.drive.files.list({
+                    q: `'${folderId}' in parents and name='${GD_BACKUP_FILENAME}' and trashed=false`,
+                    fields: 'files(id, name, modifiedTime)',
+                    pageSize: 1,
+                })
+            );
+            if (response.result.files.length > 0) {
+                return response.result.files[0];
+            }
+            return null;
+        } catch (err) {
+            console.warn('getLatestBackupMetadata error:', err);
             return null;
         }
     }
@@ -1028,6 +1060,49 @@
         }, intervalMs);
     }
 
+    // ---- Daily backup check (silent) ----
+    async function performDailyBackupCheck() {
+        if (!accessToken) {
+            console.log('Daily backup check: Not connected, skipping.');
+            return;
+        }
+        if (isDailyBackupRunning) {
+            console.log('Daily backup check: Already running, skipping.');
+            return;
+        }
+        isDailyBackupRunning = true;
+        try {
+            console.log('Performing daily backup check...');
+            const latestFile = await getLatestBackupMetadata();
+            const now = new Date();
+            let shouldBackup = false;
+
+            if (!latestFile) {
+                console.log('No existing backup file found. Will create one.');
+                shouldBackup = true;
+            } else {
+                const modified = new Date(latestFile.modifiedTime);
+                const diffHours = (now - modified) / (1000 * 60 * 60);
+                console.log(`Latest backup modified at ${modified.toISOString()}, ${diffHours.toFixed(1)} hours ago.`);
+                if (diffHours > 24) {
+                    console.log('Backup is older than 24 hours. Triggering backup.');
+                    shouldBackup = true;
+                } else {
+                    console.log('Backup is recent enough, no action needed.');
+                }
+            }
+
+            if (shouldBackup) {
+                console.log('Starting silent daily backup...');
+                await uploadBackupToDrive(false); // silent
+            }
+        } catch (err) {
+            console.warn('Daily backup check error:', err);
+        } finally {
+            isDailyBackupRunning = false;
+        }
+    }
+
     function updateSettingsUI() {
         const statusBadge = document.getElementById('syncStatusBadge');
         const reconnectBtn = document.getElementById('gdriveReconnectBtn');
@@ -1371,6 +1446,10 @@
             if (navigator.onLine) {
                 statusDot.className = 'status-dot';
                 offlineIndicator.textContent = 'Online';
+                // If connected to Drive, trigger daily backup check
+                if (accessToken) {
+                    setTimeout(() => performDailyBackupCheck(), 3000);
+                }
             } else {
                 statusDot.className = 'status-dot offline';
                 offlineIndicator.textContent = 'Offline';
