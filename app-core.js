@@ -3,7 +3,7 @@
 // Daily backup check, persistent OAuth, folder caching, upsert backup, disconnect, refined UI,
 // sync status indicator, retry-on-401, smart auto-backup, service & warranty, product inventory
 // + Reset & Delete Data, Daily Backup Status, Auto-backup default 4h enabled, Inventory Type column,
-// GST 0% fix, View modal table header fix
+// GST 0% fix, View modal table header fix, File System Access API for local disk sync
 
 (function() {
     'use strict';
@@ -51,6 +51,7 @@
             request.onsuccess = () => {
                 resolve(request.result);
                 if (!_suppressAutoBackup) scheduleAutoBackup();
+                scheduleLocalFileWrite(); // trigger local file write on data change
             };
             request.onerror = () => reject(request.error);
         });
@@ -64,6 +65,7 @@
             request.onsuccess = () => {
                 resolve(request.result);
                 if (!_suppressAutoBackup) scheduleAutoBackup();
+                scheduleLocalFileWrite();
             };
             request.onerror = () => reject(request.error);
         });
@@ -97,6 +99,7 @@
             request.onsuccess = () => {
                 resolve();
                 if (!_suppressAutoBackup) scheduleAutoBackup();
+                scheduleLocalFileWrite();
             };
             request.onerror = () => reject(request.error);
         });
@@ -110,6 +113,7 @@
             request.onsuccess = () => {
                 resolve();
                 // Do NOT trigger auto-backup here (will be handled by bulk restore)
+                // But we may want to write local file after bulk operations
             };
             request.onerror = () => reject(request.error);
         });
@@ -1323,6 +1327,7 @@
 
     function saveProfile(profile) {
         localStorage.setItem('genfin_profile', JSON.stringify(profile));
+        scheduleLocalFileWrite();
     }
 
     // ---- Service and Warranty ID generators ----
@@ -2775,10 +2780,322 @@
         }
     }
 
-    // ---------- SETTINGS: Backup & Restore + Google Drive + Reset ----------
+    // ================================================================
+    // ---------- FILE SYSTEM ACCESS API (Local Disk Sync) ----------
+    // ================================================================
+
+    let localFileHandle = null;
+    let localFileWriteDebounceTimer = null;
+    let localFileWritePending = false;
+    let localFileLastWriteTime = null;
+
+    // Check if File System Access API is supported
+    function isFileSystemAccessSupported() {
+        return 'showSaveFilePicker' in window && 'showDirectoryPicker' in window;
+    }
+
+    // Load stored file handle from settings
+    async function loadLocalFileHandle() {
+        try {
+            const handleData = await dbGetSetting('localFileHandle');
+            if (handleData) {
+                // For security, we can't restore a handle directly from JSON; we need to request permission again.
+                // We'll store only the file name and last modified time to display, but we need to re-prompt user.
+                // Actually, we can store the handle as a serialized object but it's not portable.
+                // Better approach: store the file name and path (for display) and ask user to select again if needed.
+                // We'll implement a simpler approach: we store the file name and timestamp, and on app load we check if we have a valid handle.
+                // Since we can't persist a handle across sessions reliably (permission may be lost), we'll use a flag to indicate a file was selected.
+                // The user will need to re-select on each session, but we can ask for permission to keep the handle.
+                // Actually, we can store the handle as an object in IndexedDB using structured clone, but that's not safe.
+                // We'll store a "fileSelected" flag and the last write time; on app load we'll check if the file exists and prompt to reconnect if needed.
+                // For simplicity, we'll use a toast to ask user to re-select if we detect we need to write.
+                // We'll store the file name for display.
+                if (handleData.fileName) {
+                    return { fileName: handleData.fileName, lastWrite: handleData.lastWrite };
+                }
+            }
+            return null;
+        } catch (err) {
+            console.warn('Error loading local file handle:', err);
+            return null;
+        }
+    }
+
+    async function saveLocalFileHandleInfo(fileName) {
+        await dbSetSetting('localFileHandle', { fileName, lastWrite: localFileLastWriteTime || new Date().toISOString() });
+    }
+
+    async function clearLocalFileHandleInfo() {
+        await dbDeleteSetting('localFileHandle');
+        localFileHandle = null;
+        localFileLastWriteTime = null;
+        updateLocalFileUI();
+    }
+
+    // Request a file handle from user (save as dialog)
+    async function requestLocalFileHandle() {
+        if (!isFileSystemAccessSupported()) {
+            showToast('File System Access API not supported in this browser.', 'error');
+            return false;
+        }
+        try {
+            // Suggest a default filename
+            const suggestedName = `genfin_local_data_${new Date().toISOString().slice(0,10)}.json`;
+            const options = {
+                suggestedName,
+                types: [
+                    {
+                        description: 'JSON Files',
+                        accept: { 'application/json': ['.json'] },
+                    },
+                ],
+            };
+            const handle = await window.showSaveFilePicker(options);
+            // Request write permission
+            const permission = await handle.requestPermission({ mode: 'readwrite' });
+            if (permission !== 'granted') {
+                showToast('Permission to write to file was denied.', 'error');
+                return false;
+            }
+            localFileHandle = handle;
+            // Write initial data
+            await writeDataToLocalFile();
+            // Save info
+            await saveLocalFileHandleInfo(handle.name);
+            showToast(`Local file selected: ${handle.name}`, 'success');
+            updateLocalFileUI();
+            return true;
+        } catch (err) {
+            if (err.name !== 'AbortError' && err.name !== 'SecurityError') {
+                console.error('Error selecting file:', err);
+                showToast('Failed to select file: ' + err.message, 'error');
+            }
+            return false;
+        }
+    }
+
+    // Check if we have a valid handle and permission
+    async function checkLocalFilePermission() {
+        if (!localFileHandle) return false;
+        try {
+            // Request permission
+            const permission = await localFileHandle.requestPermission({ mode: 'readwrite' });
+            if (permission === 'granted') {
+                return true;
+            } else {
+                // Permission denied or not granted
+                return false;
+            }
+        } catch (err) {
+            console.warn('Permission check error:', err);
+            return false;
+        }
+    }
+
+    // Write all data to the local file
+    async function writeDataToLocalFile() {
+        if (!localFileHandle) {
+            // No file selected, try to load from settings
+            const info = await loadLocalFileHandle();
+            if (info && info.fileName) {
+                // We have a file name, but we need to re-ask user to select it again (or we can try to get handle via window.showOpenFilePicker)
+                // For simplicity, we'll show a toast to reconnect
+                showLocalFileReconnectToast();
+                return false;
+            }
+            return false;
+        }
+        // Check permission
+        const hasPermission = await checkLocalFilePermission();
+        if (!hasPermission) {
+            showLocalFileReconnectToast();
+            return false;
+        }
+        try {
+            // Gather all data
+            const customers = await dbGetAll('customers');
+            const suppliers = await dbGetAll('suppliers');
+            const products = await dbGetAll('products');
+            const invoices = await dbGetAll('invoices');
+            const purchaseOrders = await dbGetAll('purchaseOrders');
+            const expenses = await dbGetAll('expenses');
+            const serviceHistory = await dbGetAll('serviceHistory');
+            const warranties = await dbGetAll('warranties');
+            const settings = await dbGetAll('settings');
+            const profile = getProfile();
+            const data = {
+                version: 2,
+                timestamp: new Date().toISOString(),
+                profile,
+                customers,
+                suppliers,
+                products,
+                invoices,
+                purchaseOrders,
+                expenses,
+                serviceHistory,
+                warranties,
+                settings
+            };
+            const jsonStr = JSON.stringify(data, null, 2);
+            const writable = await localFileHandle.createWritable();
+            await writable.write(jsonStr);
+            await writable.close();
+            localFileLastWriteTime = new Date().toISOString();
+            await saveLocalFileHandleInfo(localFileHandle.name);
+            updateLocalFileUI();
+            return true;
+        } catch (err) {
+            console.error('Error writing to local file:', err);
+            // If permission error, show reconnect toast
+            if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+                showLocalFileReconnectToast();
+            } else {
+                showToast('Error writing to local file: ' + err.message, 'error');
+            }
+            return false;
+        }
+    }
+
+    // Debounced write to local file
+    function scheduleLocalFileWrite() {
+        if (!localFileHandle && !localFileHandleInfoExists()) {
+            // No file selected, skip
+            return;
+        }
+        if (localFileWriteDebounceTimer) {
+            clearTimeout(localFileWriteDebounceTimer);
+        }
+        localFileWriteDebounceTimer = setTimeout(async () => {
+            localFileWriteDebounceTimer = null;
+            await writeDataToLocalFile();
+        }, 2000); // 2 second debounce to avoid frequent writes
+    }
+
+    // Check if we have stored info about a local file
+    async function localFileHandleInfoExists() {
+        const info = await loadLocalFileHandle();
+        return info && info.fileName;
+    }
+
+    // Show a toast to reconnect local file
+    function showLocalFileReconnectToast() {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+        // Remove existing reconnect toast to avoid duplicates
+        const existing = container.querySelector('.toast-local-file-reconnect');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'toast toast-warning toast-local-file-reconnect';
+        toast.style.cursor = 'pointer';
+        toast.innerHTML = `
+            <span>📁 Local file sync needs attention. </span>
+            <button class="btn btn-sm btn-primary" style="margin-left:10px; padding:2px 12px;">Reconnect</button>
+        `;
+        const reconnectBtn = toast.querySelector('button');
+        reconnectBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await requestLocalFileHandle();
+            toast.remove();
+        });
+        toast.addEventListener('click', async () => {
+            await requestLocalFileHandle();
+            toast.remove();
+        });
+        container.appendChild(toast);
+        // Auto-remove after 30 seconds or when reconnected
+        setTimeout(() => {
+            if (toast.parentNode) toast.remove();
+        }, 30000);
+    }
+
+    // Initialize local file sync on app load
+    async function initializeLocalFileSync() {
+        if (!isFileSystemAccessSupported()) {
+            console.log('File System Access API not supported, local file sync disabled.');
+            return;
+        }
+        const info = await loadLocalFileHandle();
+        if (info && info.fileName) {
+            // We have a file name, but we need to get a handle. We can't get a handle from name alone.
+            // We'll show a toast to reconnect, and also try to automatically reconnect by prompting user.
+            // For better UX, we can try to open the file using showOpenFilePicker with the same name? Not possible.
+            // So we'll just show a reconnect toast.
+            showLocalFileReconnectToast();
+            // Also update UI to show the file name
+            updateLocalFileUI(info.fileName);
+        }
+    }
+
+    // Update UI elements for local file sync (in Settings)
+    function updateLocalFileUI(fileName) {
+        const statusEl = document.getElementById('localFileStatus');
+        const nameEl = document.getElementById('localFileName');
+        const lastWriteEl = document.getElementById('localFileLastWrite');
+        const selectBtn = document.getElementById('selectLocalFileBtn');
+        const disconnectBtn = document.getElementById('disconnectLocalFileBtn');
+
+        if (nameEl) {
+            if (fileName || localFileHandle) {
+                const name = fileName || (localFileHandle ? localFileHandle.name : '');
+                nameEl.textContent = name || 'No file selected';
+            } else {
+                nameEl.textContent = 'No file selected';
+            }
+        }
+        if (statusEl) {
+            if (localFileHandle) {
+                statusEl.textContent = '✅ Connected';
+                statusEl.style.color = '#10b981';
+            } else if (await localFileHandleInfoExists()) {
+                statusEl.textContent = '⚠️ Reconnect required';
+                statusEl.style.color = '#f59e0b';
+            } else {
+                statusEl.textContent = 'Not connected';
+                statusEl.style.color = '#6b7280';
+            }
+        }
+        if (lastWriteEl) {
+            if (localFileLastWriteTime) {
+                lastWriteEl.textContent = new Date(localFileLastWriteTime).toLocaleString();
+            } else {
+                // try to load from settings
+                loadLocalFileHandle().then(info => {
+                    if (info && info.lastWrite) {
+                        lastWriteEl.textContent = new Date(info.lastWrite).toLocaleString();
+                    } else {
+                        lastWriteEl.textContent = 'Never';
+                    }
+                });
+            }
+        }
+        if (selectBtn) {
+            selectBtn.textContent = localFileHandle ? 'Change File Location' : 'Select File Location';
+        }
+        if (disconnectBtn) {
+            disconnectBtn.style.display = localFileHandle ? 'inline-block' : 'none';
+        }
+    }
+
+    // Disconnect local file
+    async function disconnectLocalFile() {
+        if (confirm('Disconnect local file sync?')) {
+            await clearLocalFileHandleInfo();
+            updateLocalFileUI();
+            showToast('Local file sync disconnected', 'info');
+        }
+    }
+
+    // ================================================================
+
+    // ---------- SETTINGS: Backup & Restore + Google Drive + Reset + Local Disk Sync ----------
     async function renderSettings() {
         createSyncIndicator();
         updateGlobalSyncIndicator();
+
+        const localFileInfo = await loadLocalFileHandle();
+        const localFileName = localFileInfo ? localFileInfo.fileName : '';
 
         mainContent.innerHTML = `
             <div class="page-header"><h1 class="page-title">Settings</h1></div>
@@ -2851,6 +3168,29 @@
                 </div>
             </div>
 
+            <!-- New Card: Local Disk Sync (File System Access API) -->
+            <div class="card">
+                <h3>💾 Local Disk Sync (Save to a JSON file on your computer)</h3>
+                <p style="color: #6b7280; margin-bottom: 12px;">
+                    Choose a location on your hard drive to automatically save all your business data as a JSON file. 
+                    Every change you make will be written to this file (with a 2-second debounce). 
+                    If the file is moved or deleted, you can reconnect.
+                </p>
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
+                    <button class="btn btn-primary" id="selectLocalFileBtn">Select File Location</button>
+                    <button class="btn btn-danger" id="disconnectLocalFileBtn" style="display: none;">Disconnect</button>
+                </div>
+                <div style="font-size: 0.9rem; background: #f8fafc; padding: 12px; border-radius: 6px;">
+                    <div><strong>Status:</strong> <span id="localFileStatus">Not connected</span></div>
+                    <div><strong>File:</strong> <span id="localFileName">${localFileName || 'No file selected'}</span></div>
+                    <div><strong>Last write:</strong> <span id="localFileLastWrite">${localFileInfo && localFileInfo.lastWrite ? new Date(localFileInfo.lastWrite).toLocaleString() : 'Never'}</span></div>
+                </div>
+                <div style="margin-top: 12px; font-size:0.75rem; background: #eef2ff; padding: 8px; border-radius: 4px; color: #3730a3;">
+                    ⚙️ The file is updated automatically on every data change (invoices, POs, expenses, inventory, etc.). 
+                    Use this as an additional backup or to migrate data to another device.
+                </div>
+            </div>
+
             <!-- Reset & Delete Data -->
             <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
                 <h3 style="color: #dc2626;">⚠️ Reset & Delete Data</h3>
@@ -2859,6 +3199,20 @@
             </div>
         `;
 
+        // --- Event listeners for local file sync ---
+        const selectLocalBtn = document.getElementById('selectLocalFileBtn');
+        const disconnectLocalBtn = document.getElementById('disconnectLocalFileBtn');
+        if (selectLocalBtn) {
+            selectLocalBtn.addEventListener('click', async () => {
+                await requestLocalFileHandle();
+                updateLocalFileUI();
+            });
+        }
+        if (disconnectLocalBtn) {
+            disconnectLocalBtn.addEventListener('click', disconnectLocalFile);
+        }
+
+        // --- Other settings listeners ---
         document.getElementById('exportBackupBtn').addEventListener('click', exportBackup);
         const importBtn = document.getElementById('importBackupBtn');
         const fileInput = document.getElementById('backupFileInput');
@@ -2904,7 +3258,6 @@
 
         const autoCheck = document.getElementById('gdriveAutoBackup');
         if (autoCheck) {
-            // Default to true if not explicitly set to false
             const stored = localStorage.getItem('gdrive_auto_backup');
             autoCheck.checked = stored !== 'false';
             autoCheck.addEventListener('change', (e) => {
@@ -2919,15 +3272,16 @@
             });
         }
 
-        // Reset button
         const resetBtn = document.getElementById('resetDataBtn');
         if (resetBtn) {
             resetBtn.addEventListener('click', resetAllData);
         }
 
+        // Update Drive UI and local file UI
         updateDriveUI(!!accessToken);
         updateLastBackupUI();
         updateSettingsUI();
+        updateLocalFileUI();
         if (accessToken) {
             fetchDriveUserEmail().catch(() => {});
             if (lastBackupFileId) {
@@ -3674,6 +4028,8 @@
     openDB().then(() => {
         updateOnlineStatus();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
+        // Initialize local file sync
+        initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
         navigateTo('dashboard');
         scheduleVersionCheck();
     }).catch(err => {
