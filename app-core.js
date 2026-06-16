@@ -2,6 +2,7 @@
 // WITH PERSISTENT OAUTH, FOLDER CACHING, UPSERT BACKUP, DISCONNECT, REFINED UI,
 // SYNC STATUS INDICATOR, RETRY-ON-401, SMART AUTO-BACKUP
 // PATCH: Fixed 401 on userinfo, 403 on upload with fallback to new file creation
+// PATCH: Better popup blocker handling and user guidance
 (function() {
     'use strict';
 
@@ -150,6 +151,7 @@
     let lastBackupFileId = null;
     let initPromise = null; // for concurrency control
     let isRefreshing = false; // prevent concurrent refreshes
+    let popupBlocked = false; // track if popup was blocked
 
     const GD_CLIENT_ID = '769525551930-5d645morj103efjqp7baq95b3629k38h.apps.googleusercontent.com';
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -305,6 +307,8 @@
         scheduleTokenRefresh(expiry);
         setSyncState('idle');
         scheduleAutoBackup();
+        // Fetch email again in background, but ignore errors
+        fetchDriveUserEmail().catch(() => {});
     }
 
     async function loadDriveToken() {
@@ -321,6 +325,7 @@
         folderIdCache = null;
         lastBackupFileId = null;
         isRefreshing = false;
+        popupBlocked = false;
         if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
         await dbDeleteSetting('gdrive_token');
         await dbDeleteSetting('gdrive_expiry');
@@ -525,16 +530,28 @@
         }
     }
 
-    // ---- Sign-in with robust error handling ----
+    // ---- Sign-in with robust error handling and popup detection ----
     function signInToGoogle() {
         console.log('signInToGoogle called');
+        // Reset popup blocked flag
+        popupBlocked = false;
         try {
             if (!driveInitialized || driveInitFailed) {
                 initGoogleDriveModule(true)
                     .then(() => {
                         console.log('Init successful, requesting token...');
                         if (tokenClient) {
-                            tokenClient.requestAccessToken({ prompt: 'consent' });
+                            // Try to request token; if popup is blocked, catch the error
+                            try {
+                                tokenClient.requestAccessToken({ prompt: 'consent' });
+                            } catch (popupErr) {
+                                console.warn('Popup blocked or error:', popupErr);
+                                popupBlocked = true;
+                                showToast('⚠️ Popup was blocked. Please allow popups for this site and try again.', 'error');
+                                // Update UI to show a hint
+                                const authBtn = document.getElementById('gdriveAuthBtn');
+                                if (authBtn) authBtn.textContent = '🔄 Allow Popups & Retry';
+                            }
                         } else {
                             showToast('Token client not available after init', 'error');
                         }
@@ -545,7 +562,15 @@
                     });
             } else {
                 if (tokenClient) {
-                    tokenClient.requestAccessToken({ prompt: 'consent' });
+                    try {
+                        tokenClient.requestAccessToken({ prompt: 'consent' });
+                    } catch (popupErr) {
+                        console.warn('Popup blocked or error:', popupErr);
+                        popupBlocked = true;
+                        showToast('⚠️ Popup was blocked. Please allow popups for this site and try again.', 'error');
+                        const authBtn = document.getElementById('gdriveAuthBtn');
+                        if (authBtn) authBtn.textContent = '🔄 Allow Popups & Retry';
+                    }
                 } else {
                     showToast('Token client not available', 'error');
                 }
@@ -871,6 +896,7 @@
         const actionsDiv = document.getElementById('gdriveActions');
         const statusSpan = document.getElementById('gdriveStatus');
         const disconnectBtn = document.getElementById('gdriveDisconnectBtn');
+        const authBtn = document.getElementById('gdriveAuthBtn');
         if (!authPanel || !actionsDiv) return;
         if (connected && accessToken) {
             authPanel.style.display = 'none';
@@ -881,11 +907,21 @@
                 <span style="font-size:0.8rem;color:#6b7280;">Token expires: ${expiryStr}</span>
             `;
             if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
+            // Reset button text if it was changed
+            if (authBtn) authBtn.textContent = 'Connect to Google Drive';
         } else {
             authPanel.style.display = 'block';
             actionsDiv.style.display = 'none';
             statusSpan.innerHTML = driveInitFailed ? 'Drive service unavailable – check your connection or client ID' : 'Not connected';
             if (disconnectBtn) disconnectBtn.style.display = 'none';
+            if (authBtn) {
+                // If popup was blocked, change button text to hint
+                if (popupBlocked) {
+                    authBtn.textContent = '🔄 Allow Popups & Retry';
+                } else {
+                    authBtn.textContent = 'Connect to Google Drive';
+                }
+            }
         }
         updateGlobalSyncIndicator();
     }
@@ -1014,6 +1050,12 @@
             } else {
                 reconnectBtn.style.display = 'none';
                 connectBtn.style.display = 'inline-block';
+                // If popup was blocked, update button text
+                if (popupBlocked) {
+                    connectBtn.textContent = '🔄 Allow Popups & Retry';
+                } else {
+                    connectBtn.textContent = 'Connect to Google Drive';
+                }
             }
         }
 
@@ -2310,6 +2352,9 @@
                             <div style="margin-top: 8px; font-size:0.75rem; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:8px;">
                                 <strong>What gets backed up:</strong> All business data (customers, suppliers, products, invoices, purchase orders, expenses, and your business profile) in a single JSON file. The backup is stored as <code>genfin_latest_backup.json</code> in your <strong>GenFinBackups</strong> folder on Drive.
                             </div>
+                            <div style="margin-top: 6px; font-size:0.75rem; background: #fef9e7; padding: 6px; border-radius: 4px; color: #7c6a2d;">
+                                💡 If the popup is blocked, please allow popups for this site and click "Connect" again.
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2328,7 +2373,12 @@
         });
 
         const authBtn = document.getElementById('gdriveAuthBtn');
-        if (authBtn) authBtn.addEventListener('click', signInToGoogle);
+        if (authBtn) {
+            authBtn.addEventListener('click', signInToGoogle);
+            if (popupBlocked) {
+                authBtn.textContent = '🔄 Allow Popups & Retry';
+            }
+        }
         const reconnectBtn = document.getElementById('gdriveReconnectBtn');
         if (reconnectBtn) reconnectBtn.addEventListener('click', signInToGoogle);
         const backupBtn = document.getElementById('gdriveBackupBtn');
