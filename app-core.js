@@ -1,20 +1,19 @@
-// app-core.js - GenFin Modern Edition (Profit Tracking & Reporting)
-// WITH PERSISTENT OAUTH, FOLDER CACHING, UPSERT BACKUP, DISCONNECT, REFINED UI,
-// SYNC STATUS INDICATOR, RETRY-ON-401, SMART AUTO-BACKUP
-// PATCH: Fixed 401 on userinfo, 403 on upload with fallback to new file creation
-// PATCH: Better popup blocker handling and user guidance
-// PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
-// PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
-// PATCH: Removed dynamic navigation injection (now static in index.html)
-// PATCH: Fixed "Failed to execute 'json' on 'Response': body stream already read" by avoiding double reads
-// ENHANCEMENT: Automatic daily backup check on app start and on online event
+// app-core.js - GenFin Modern Edition
+// WITH APP VERSION CHECK AND DYNAMIC UPDATE
+// Daily backup check, persistent OAuth, folder caching, upsert backup, disconnect, refined UI,
+// sync status indicator, retry-on-401, smart auto-backup, service & warranty, product inventory
 
 (function() {
     'use strict';
 
+    // ---------- App Version ----------
+    const APP_VERSION = '1.0.0'; // Update this on each release
+    const VERSION_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
+    let versionCheckTimer = null;
+
     // ---------- IndexedDB wrapper ----------
     const DB_NAME = 'GenFinDB';
-    const DB_VERSION = 6;  // bumped for new stores
+    const DB_VERSION = 6;
     let db;
 
     const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
@@ -111,7 +110,7 @@
         });
     }
 
-    // ---------- Settings helpers for token storage ----------
+    // ---------- Settings helpers ----------
     function dbGetSetting(key) {
         return new Promise((resolve, reject) => {
             const tx = db.transaction('settings', 'readonly');
@@ -142,7 +141,95 @@
         });
     }
 
-    // ---------- Google Drive Backup Module (FULLY FIXED) ----------
+    // ---------- App Version Check ----------
+    async function checkForAppUpdate() {
+        try {
+            // Use cache-busting to avoid stale version file
+            const url = `./app-version.json?t=${Date.now()}`;
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                console.warn('Version check failed:', response.status);
+                return;
+            }
+            const data = await response.json();
+            const remoteVersion = data.version;
+            if (!remoteVersion) return;
+
+            if (remoteVersion !== APP_VERSION) {
+                // New version available
+                showUpdateToast(remoteVersion);
+            } else {
+                console.log('App is up to date (v' + APP_VERSION + ')');
+            }
+        } catch (err) {
+            console.warn('Version check error:', err);
+        }
+    }
+
+    function showUpdateToast(newVersion) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        // Remove any existing update toast
+        const existing = container.querySelector('.toast-update');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'toast toast-info toast-update';
+        toast.style.cursor = 'pointer';
+        toast.innerHTML = `
+            <span>🔄 New version ${newVersion} available! </span>
+            <button class="btn btn-sm btn-primary" style="margin-left:10px; padding:2px 12px;">Update Now</button>
+        `;
+        const updateBtn = toast.querySelector('button');
+        updateBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await performAppUpdate();
+        });
+        // Also click on toast itself triggers update
+        toast.addEventListener('click', async () => {
+            await performAppUpdate();
+        });
+
+        container.appendChild(toast);
+        // Auto-hide after 30 seconds?
+        setTimeout(() => {
+            if (toast.parentNode) toast.remove();
+        }, 30000);
+    }
+
+    async function performAppUpdate() {
+        try {
+            showToast('Updating app...', 'info');
+            // Unregister all service workers
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const registration of registrations) {
+                await registration.unregister();
+            }
+            // Delete all caches
+            const cacheNames = await caches.keys();
+            await Promise.all(cacheNames.map(name => caches.delete(name)));
+            // Clear any stale data (optional)
+            localStorage.removeItem('genfin_last_success');
+            localStorage.removeItem('genfin_last_attempt');
+            localStorage.removeItem('genfin_last_error');
+            // Reload the page to fetch fresh resources
+            window.location.reload(true);
+        } catch (err) {
+            console.error('Update failed:', err);
+            showToast('Update failed: ' + err.message, 'error');
+        }
+    }
+
+    function scheduleVersionCheck() {
+        if (versionCheckTimer) clearInterval(versionCheckTimer);
+        // Check immediately on first call
+        checkForAppUpdate();
+        // Then every interval
+        versionCheckTimer = setInterval(checkForAppUpdate, VERSION_CHECK_INTERVAL);
+    }
+
+    // ---------- Google Drive Backup Module ----------
     let gapiInited = false;
     let gisInited = false;
     let tokenClient = null;
@@ -155,17 +242,17 @@
     let driveInitFailed = false;
     let folderIdCache = null;
     let lastBackupFileId = null;
-    let initPromise = null; // for concurrency control
-    let isRefreshing = false; // prevent concurrent refreshes
-    let popupBlocked = false; // track if popup was blocked
-    let isDailyBackupRunning = false; // prevent concurrent daily checks
+    let initPromise = null;
+    let isRefreshing = false;
+    let popupBlocked = false;
+    let isDailyBackupRunning = false;
 
     const GD_CLIENT_ID = '769525551930-5d645morj103efjqp7baq95b3629k38h.apps.googleusercontent.com';
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
     const GD_APP_FOLDER_NAME = 'GenFinBackups';
     const GD_BACKUP_FILENAME = 'genfin_latest_backup.json';
 
-    // ---- Sync state machine ----
+    // Sync state machine
     const syncState = {
         status: 'disconnected',
         lastSuccessAt: null,
@@ -232,13 +319,11 @@
         }
     }
 
-    // ---- Proper token refresh with Promise ----
     async function refreshAccessToken() {
         if (!tokenClient) {
             throw new Error('Token client not available');
         }
         if (isRefreshing) {
-            // Wait for the ongoing refresh to complete
             return new Promise((resolve) => {
                 const check = () => {
                     if (!isRefreshing) resolve(accessToken);
@@ -259,7 +344,6 @@
                     } else {
                         setAccessToken(resp.access_token);
                         tokenExpiry = Date.now() + (resp.expires_in * 1000);
-                        // Don't refetch email on every refresh, but update expiry
                         dbSetSetting('gdrive_token', resp.access_token).then(() => {
                             dbSetSetting('gdrive_expiry', tokenExpiry);
                             scheduleTokenRefresh(tokenExpiry);
@@ -284,14 +368,12 @@
         try {
             return await fn();
         } catch (err) {
-            // Handle 401 by refreshing token and retrying
             if (retry && (err.status === 401 || (err.result && err.result.error && err.result.error.code === 401))) {
                 console.warn('401 detected, attempting token refresh');
                 setSyncState('expired');
                 setAccessToken(null);
                 try {
                     await refreshAccessToken();
-                    // Retry once with the new token
                     return await fn();
                 } catch (refreshErr) {
                     setSyncState('disconnected', 'Token refresh failed');
@@ -302,7 +384,6 @@
         }
     }
 
-    // ---- Token persistence ----
     async function saveDriveToken(token, expiresIn, email) {
         setAccessToken(token);
         const expiry = Date.now() + (expiresIn * 1000);
@@ -314,9 +395,7 @@
         scheduleTokenRefresh(expiry);
         setSyncState('idle');
         scheduleAutoBackup();
-        // Fetch email again in background, but ignore errors
         fetchDriveUserEmail().catch(() => {});
-        // Trigger daily backup check after a short delay
         setTimeout(() => performDailyBackupCheck(), 5000);
     }
 
@@ -364,7 +443,6 @@
         }
     }
 
-    // ---- Google API init (fully retryable) ----
     async function initGoogleDriveModule(force = false) {
         if (driveInitialized && !force) return;
         if (initPromise) return initPromise;
@@ -375,7 +453,6 @@
                 await waitForGlobalObjects();
                 await initGoogleAPI();
                 await initGIS();
-                // Restore stored token
                 const stored = await loadDriveToken();
                 if (stored.token && stored.expiry) {
                     const now = Date.now();
@@ -385,18 +462,15 @@
                         currentDriveUserEmail = stored.email || '';
                         updateDriveUI(true);
                         scheduleTokenRefresh(tokenExpiry);
-                        // Fetch email in background (don't block)
                         fetchDriveUserEmail().catch(() => {});
                         setSyncState('idle');
                         scheduleAutoBackup();
                         console.log('Drive token restored from DB');
-                        // Trigger daily backup check after a short delay
                         setTimeout(() => performDailyBackupCheck(), 5000);
                     } else {
                         console.log('Drive token expired – attempting silent refresh');
                         if (tokenClient) {
                             await refreshAccessToken();
-                            // After refresh, token is saved and daily check will be triggered inside saveDriveToken
                         } else {
                             throw new Error('tokenClient not ready');
                         }
@@ -469,15 +543,12 @@
                             return;
                         }
                         try {
-                            // Set token first so subsequent calls can use it
                             setAccessToken(resp.access_token);
-                            // Try to fetch email, but don't fail if it doesn't work
                             let email = '';
                             try {
                                 email = await fetchDriveUserEmail();
                             } catch (emailErr) {
-                                console.warn('Could not fetch user email, continuing with empty email:', emailErr);
-                                // If it's a 401, try one more time with a fresh token
+                                console.warn('Could not fetch user email:', emailErr);
                                 if (emailErr.status === 401) {
                                     try {
                                         await refreshAccessToken();
@@ -490,11 +561,8 @@
                             await saveDriveToken(resp.access_token, resp.expires_in, email);
                             updateDriveUI(true);
                             showToast('Connected to Google Drive', 'success');
-                            // Fetch email again after token is saved (background)
                             fetchDriveUserEmail().catch(() => {});
-                            // Trigger daily backup check (already called inside saveDriveToken)
                         } catch (e) {
-                            // If anything fails, still try to save the token
                             try {
                                 await saveDriveToken(resp.access_token, resp.expires_in, '');
                                 updateDriveUI(true);
@@ -537,16 +605,13 @@
             return '';
         } catch (err) {
             console.warn('fetchDriveUserEmail error:', err.message);
-            // If it's a 401, let the caller handle it
             if (err.status === 401) throw err;
             return '';
         }
     }
 
-    // ---- Sign-in with robust error handling and popup detection ----
     function signInToGoogle() {
         console.log('signInToGoogle called');
-        // Reset popup blocked flag
         popupBlocked = false;
         try {
             if (!driveInitialized || driveInitFailed) {
@@ -554,14 +619,12 @@
                     .then(() => {
                         console.log('Init successful, requesting token...');
                         if (tokenClient) {
-                            // Try to request token; if popup is blocked, catch the error
                             try {
                                 tokenClient.requestAccessToken({ prompt: 'consent' });
                             } catch (popupErr) {
                                 console.warn('Popup blocked or error:', popupErr);
                                 popupBlocked = true;
                                 showToast('⚠️ Popup was blocked. Please allow popups for this site and try again.', 'error');
-                                // Update UI to show a hint
                                 const authBtn = document.getElementById('gdriveAuthBtn');
                                 if (authBtn) authBtn.textContent = '🔄 Allow Popups & Retry';
                             }
@@ -594,7 +657,6 @@
         }
     }
 
-    // ---- Drive folder caching ----
     async function ensureBackupFolder(forceRefresh = false) {
         if (!accessToken) throw new Error('Not connected');
         if (folderIdCache && !forceRefresh) return folderIdCache;
@@ -645,15 +707,11 @@
             }
             return null;
         } catch (err) {
-            // If we can't list files (e.g., 403), return null so we try to create a new one
             console.warn('getLatestBackupFileId error:', err);
             return null;
         }
     }
 
-    /**
-     * Get the latest backup file metadata (including modifiedTime)
-     */
     async function getLatestBackupMetadata() {
         if (!accessToken) return null;
         try {
@@ -675,7 +733,6 @@
         }
     }
 
-    // Delete a file from Drive (used as fallback when PATCH fails with 403)
     async function deleteDriveFile(fileId) {
         if (!accessToken || !fileId) return false;
         try {
@@ -709,7 +766,7 @@
             const warranties = await dbGetAll('warranties');
             const profile = getProfile();
             const backupData = {
-                version: 2,  // bump version due to new stores
+                version: 2,
                 timestamp: new Date().toISOString(),
                 profile, customers, suppliers, products,
                 invoices, purchaseOrders, expenses,
@@ -718,7 +775,6 @@
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
 
-            // Try to get existing file ID
             let fileId = await getLatestBackupFileId();
             let uploadUrl, method;
             let metadata = {
@@ -726,7 +782,6 @@
                 parents: [folderId],
             };
 
-            // If we have a fileId, try to update it with PATCH
             if (fileId) {
                 uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
                 method = 'PATCH';
@@ -741,7 +796,7 @@
 
             let response;
             let uploadSuccess = false;
-            let alreadyHandled = false; // flag to avoid double reading response
+            let alreadyHandled = false;
 
             try {
                 response = await withTokenRetry(async () => {
@@ -759,17 +814,13 @@
                 });
                 uploadSuccess = true;
             } catch (err) {
-                // If we got a 403 and we were trying to PATCH, try creating a new file
                 if (err.status === 403 && method === 'PATCH') {
                     console.warn('403 on PATCH, trying to create a new file...');
-                    // Try to delete the old file first (if possible)
                     if (fileId) {
                         await deleteDriveFile(fileId);
                     }
-                    // Now create a new file with POST
                     const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
                     const newForm = new FormData();
-                    // Use a unique name to avoid conflicts
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                     const uniqueName = `genfin_backup_${timestamp}.json`;
                     const newMetadata = {
@@ -794,20 +845,16 @@
                     });
                     response = retryRes;
                     uploadSuccess = true;
-                    // Read the response once and store the ID
                     const result = await response.json();
                     lastBackupFileId = result.id;
                     updateViewBackupLink(lastBackupFileId);
                     console.log('Created new backup file with ID:', lastBackupFileId);
-                    // Mark as handled so we don't read again
                     alreadyHandled = true;
                 } else {
                     throw err;
                 }
             }
 
-            // If we successfully uploaded and we haven't already handled the response,
-            // read the file ID from the response (for PATCH or initial POST)
             if (uploadSuccess && !alreadyHandled) {
                 const result = await response.json();
                 lastBackupFileId = result.id;
@@ -856,15 +903,12 @@
             gapi.client.drive.files.get({ fileId, alt: 'media' })
         );
         const backupData = response.result;
-        // Check version - if version is 1, it doesn't have service/warranty; we'll still restore but skip those.
-        // For version 2, we expect them.
-        // We'll handle gracefully: if missing, just ignore.
         if (!backupData.version || !backupData.profile ||
             !backupData.customers || !backupData.suppliers || !backupData.products ||
             !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
             throw new Error('Invalid backup file format');
         }
-        const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and business profile).\n\nAre you absolutely sure you want to proceed?';
+        const confirmMsg = '⚠️ WARNING: This will replace ALL existing data.\n\nAre you absolutely sure?';
         if (!confirm(confirmMsg)) return false;
 
         showToast('Restoring backup, please wait...', 'info');
@@ -897,7 +941,7 @@
         try {
             const files = await listDriveBackups();
             if (!files.length) {
-                showToast('No backup files found in your GenFinBackups folder', 'info');
+                showToast('No backup files found', 'info');
                 return;
             }
             const modalHtml = `
@@ -928,7 +972,7 @@
     }
 
     async function disconnectDrive() {
-        if (confirm('Disconnect from Google Drive? This will clear your stored authentication.')) {
+        if (confirm('Disconnect from Google Drive?')) {
             await clearDriveToken();
             updateDriveUI(false);
             showToast('Disconnected from Google Drive', 'info');
@@ -953,15 +997,13 @@
                 <span style="font-size:0.8rem;color:#6b7280;">Token expires: ${expiryStr}</span>
             `;
             if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
-            // Reset button text if it was changed
             if (authBtn) authBtn.textContent = 'Connect to Google Drive';
         } else {
             authPanel.style.display = 'block';
             actionsDiv.style.display = 'none';
-            statusSpan.innerHTML = driveInitFailed ? 'Drive service unavailable – check your connection or client ID' : 'Not connected';
+            statusSpan.innerHTML = driveInitFailed ? 'Drive service unavailable' : 'Not connected';
             if (disconnectBtn) disconnectBtn.style.display = 'none';
             if (authBtn) {
-                // If popup was blocked, change button text to hint
                 if (popupBlocked) {
                     authBtn.textContent = '🔄 Allow Popups & Retry';
                 } else {
@@ -984,7 +1026,6 @@
         }
     }
 
-    // ---- Global sync indicator ----
     function createSyncIndicator() {
         const footer = document.querySelector('.sidebar-footer');
         if (!footer) return;
@@ -1094,7 +1135,7 @@
 
             if (shouldBackup) {
                 console.log('Starting silent daily backup...');
-                await uploadBackupToDrive(false); // silent
+                await uploadBackupToDrive(false);
             }
         } catch (err) {
             console.warn('Daily backup check error:', err);
@@ -1139,7 +1180,6 @@
             } else {
                 reconnectBtn.style.display = 'none';
                 connectBtn.style.display = 'inline-block';
-                // If popup was blocked, update button text
                 if (popupBlocked) {
                     connectBtn.textContent = '🔄 Allow Popups & Retry';
                 } else {
@@ -1446,7 +1486,6 @@
             if (navigator.onLine) {
                 statusDot.className = 'status-dot';
                 offlineIndicator.textContent = 'Online';
-                // If connected to Drive, trigger daily backup check
                 if (accessToken) {
                     setTimeout(() => performDailyBackupCheck(), 3000);
                 }
@@ -1488,8 +1527,6 @@
     const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue', 'Partially Paid'];
     const PRODUCT_TYPES = ['Product', 'Service'];
     const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
-
-    // Product status options
     const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
 
     function invoiceItemRow(item, idx, products) {
@@ -2330,7 +2367,7 @@
         } catch(err) { showToast('Error opening supplier form', 'error'); }
     }
 
-    // ---------- Products (Enhanced with full generator details, stock, supplier) ----------
+    // ---------- Products (Enhanced) ----------
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
@@ -2346,7 +2383,6 @@
                     <th>SKU</th><th>Name</th><th>Brand</th><th>Model</th><th>Category</th><th>Capacity (KVA)</th><th>Sell Price</th><th>Stock</th><th>Status</th><th>Actions</th>
                 </tr></thead><tbody>`;
                 filteredProducts.forEach(p => {
-                    // Compute status if not set
                     let status = p.status || 'In Stock';
                     if (status !== 'Discontinued') {
                         if (p.stockQuantity <= 0) status = 'Out of Stock';
@@ -2401,11 +2437,9 @@
         try {
             const isEdit = !!prodData;
             const suppliers = await dbGetAll('suppliers');
-            // Populate default status
             let defaultStatus = 'In Stock';
             if (isEdit && prodData.status) defaultStatus = prodData.status;
             else {
-                // Compute default based on stock if new
                 const stock = prodData?.stockQuantity || 0;
                 const reorder = prodData?.reorderLevel || 0;
                 if (stock <= 0) defaultStatus = 'Out of Stock';
@@ -2729,13 +2763,12 @@
         reader.onload = async (e) => {
             try {
                 const backupData = JSON.parse(e.target.result);
-                // version 2 includes serviceHistory and warranties; version 1 doesn't.
                 if (!backupData.version || !backupData.profile || 
                     !backupData.customers || !backupData.suppliers || !backupData.products ||
                     !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
                     throw new Error('Invalid backup file format');
                 }
-                const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and business profile).\n\nAre you absolutely sure you want to proceed?';
+                const confirmMsg = '⚠️ WARNING: This will replace ALL existing data.\n\nAre you absolutely sure you want to proceed?';
                 if (!confirm(confirmMsg)) {
                     showToast('Import cancelled', 'info');
                     return;
@@ -2786,9 +2819,10 @@
         reader.readAsText(file);
     }
 
-    // ---------- ENHANCED REPORTS (GST, Profit, and Monthly Trends) ----------
+    // ---------- ENHANCED REPORTS ----------
     let currentChart = null;
     let currentTrendChart = null;
+
     async function renderReports() {
         const now = new Date();
         const currentYear = now.getFullYear();
@@ -2868,17 +2902,15 @@
         await generate();
     }
 
-    // Monthly Trends Chart (Revenue, COGS, Profit for last 12 months)
+    // Monthly Trends Chart
     async function generateTrendsReport(year) {
         const allInvoices = await dbGetAll('invoices');
-        const allPOs = await dbGetAll('purchaseOrders');
         const products = await dbGetAll('products');
         const months = [];
         const revenueData = [];
         const cogsData = [];
         const profitData = [];
-        const now = new Date();
-        const targetYear = year || now.getFullYear();
+        const targetYear = year || new Date().getFullYear();
         for (let m = 0; m < 12; m++) {
             const monthStart = new Date(targetYear, m, 1);
             const monthEnd = new Date(targetYear, m + 1, 0);
@@ -2892,7 +2924,7 @@
                 if (inv.items) {
                     for (const item of inv.items) {
                         const prod = products.find(p => p.id == item.productId);
-                        const costPerUnit = prod?.purchasePrice || 0; // use purchasePrice as cost
+                        const costPerUnit = prod?.purchasePrice || 0;
                         monthCOGS += (item.qty * costPerUnit);
                     }
                 }
@@ -2933,11 +2965,7 @@
                     { label: 'Gross Profit (₹)', data: profitData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.2, fill: true }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}` } } }
-            }
+            options: { responsive: true, maintainAspectRatio: true, plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}` } } } }
         });
     }
 
@@ -3014,7 +3042,7 @@
         return { periodLabel, totalRevenue, totalCOGS, grossProfit, grossMargin, details: profitDetails };
     }
 
-    // --- ENHANCED CSV EXPORT WITH FULL CUSTOMER/SUPPLIER GST DETAILS ---
+    // --- CSV Exports ---
     async function exportAllTransactionsCSV() {
         const invoices = await dbGetAll('invoices');
         const purchaseOrders = await dbGetAll('purchaseOrders');
@@ -3024,44 +3052,24 @@
         const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s]));
         
         const csvRows = [];
-        
-        // === INVOICES SECTION with full customer details ===
         csvRows.push(['=== INVOICES (Sales) ===']);
-        csvRows.push([
-            'Invoice #', 'Date', 'Due Date', 'Customer Name', 'Customer GSTIN', 
-            'Customer State', 'Customer Phone', 'Customer Address', 'Status', 
-            'Subtotal', 'Discount', 'Total Tax', 'Grand Total', 'Notes'
-        ]);
+        csvRows.push(['Invoice #', 'Date', 'Due Date', 'Customer Name', 'Customer GSTIN', 'Customer State', 'Customer Phone', 'Customer Address', 'Status', 'Subtotal', 'Discount', 'Total Tax', 'Grand Total', 'Notes']);
         for (const inv of invoices) {
             const cust = customerMap[inv.customerId] || {};
-            csvRows.push([
-                inv.invoiceNumber, inv.date, inv.dueDate, cust.name || '', cust.gstin || '',
-                cust.state || '', cust.phone || '', cust.address || '', inv.paymentStatus,
-                inv.subtotal, inv.discount || 0, inv.totalTax, inv.grandTotal, inv.notes || ''
-            ]);
+            csvRows.push([inv.invoiceNumber, inv.date, inv.dueDate, cust.name || '', cust.gstin || '', cust.state || '', cust.phone || '', cust.address || '', inv.paymentStatus, inv.subtotal, inv.discount || 0, inv.totalTax, inv.grandTotal, inv.notes || '']);
             csvRows.push(['Line Items:', 'Product', 'Description', 'HSN', 'Qty', 'Rate', 'GST%', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total']);
             if (inv.items) {
                 for (const item of inv.items) {
                     csvRows.push(['', item.description, '', item.hsn, item.qty, item.rate, item.selectedGstRate, item.taxable, item.cgstAmt, item.sgstAmt, item.igstAmt, item.total]);
                 }
             }
-            csvRows.push([]); // blank line between invoices
+            csvRows.push([]);
         }
-        
-        // === PURCHASE ORDERS SECTION with full supplier details ===
         csvRows.push(['=== PURCHASE ORDERS (Purchases) ===']);
-        csvRows.push([
-            'PO #', 'Date', 'Supplier Name', 'Supplier GSTIN', 'Supplier State', 
-            'Supplier Phone', 'Supplier Address', 'Status', 'Subtotal', 
-            'Discount', 'Total Tax', 'Grand Total'
-        ]);
+        csvRows.push(['PO #', 'Date', 'Supplier Name', 'Supplier GSTIN', 'Supplier State', 'Supplier Phone', 'Supplier Address', 'Status', 'Subtotal', 'Discount', 'Total Tax', 'Grand Total']);
         for (const po of purchaseOrders) {
             const supp = supplierMap[po.supplierId] || {};
-            csvRows.push([
-                po.poNumber, po.date, supp.name || '', supp.gstin || '', supp.state || '',
-                supp.phone || '', supp.address || '', po.status, po.subtotal,
-                po.discount || 0, po.totalTax, po.grandTotal
-            ]);
+            csvRows.push([po.poNumber, po.date, supp.name || '', supp.gstin || '', supp.state || '', supp.phone || '', supp.address || '', po.status, po.subtotal, po.discount || 0, po.totalTax, po.grandTotal]);
             csvRows.push(['Line Items:', 'Product', 'Description', 'HSN', 'Qty', 'Rate', 'GST%', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total']);
             if (po.items) {
                 for (const item of po.items) {
@@ -3070,8 +3078,6 @@
             }
             csvRows.push([]);
         }
-        
-        // Generate CSV string
         const csvContent = csvRows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
@@ -3128,9 +3134,8 @@
     // ---- Create sync indicator in sidebar ----
     createSyncIndicator();
 
-    // ---- NEW: Service & Warranty Module ----
+    // ---- Service & Warranty Module ----
     async function renderServiceWarranty() {
-        // Render two tabs: Service History and Warranty Tracking
         const html = `
             <div class="page-header"><h1 class="page-title">Service & Warranty</h1></div>
             <div class="card">
@@ -3166,7 +3171,6 @@
         const services = await dbGetAll('serviceHistory');
         const customers = await dbGetAll('customers');
         const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
-        // Sort by service date descending
         services.sort((a,b) => new Date(b.serviceDate) - new Date(a.serviceDate));
         let html = `
             <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
@@ -3224,7 +3228,6 @@
         const customers = await dbGetAll('customers');
         const products = await dbGetAll('products');
         const customerOptions = customers.map(c => `<option value="${c.id}" ${isEdit && serviceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
-        // For generator serial numbers, we can list from products that have serial numbers.
         const serialOptions = products.filter(p => p.serialNumber).map(p => `<option value="${escapeHtml(p.serialNumber)}" ${isEdit && serviceData.generatorSerialNumber === p.serialNumber ? 'selected' : ''}>${escapeHtml(p.serialNumber)} (${escapeHtml(p.name)})</option>`).join('');
         const modalHtml = `
             <div class="modal-overlay" id="serviceModalOverlay">
@@ -3409,11 +3412,13 @@
         });
     }
 
-    // ---- Start app (no dynamic nav injection) ----
+    // ---- Start app ----
     openDB().then(() => {
         updateOnlineStatus();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         navigateTo('dashboard');
+        // Start version checking
+        scheduleVersionCheck();
     }).catch(err => {
         console.error('IndexedDB error:', err);
         document.getElementById('mainContent').innerHTML = `
@@ -3425,4 +3430,5 @@
             </div>
         `;
     });
+
 })();

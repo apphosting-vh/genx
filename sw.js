@@ -1,6 +1,6 @@
 const CACHE_NAME = 'genfin-cache-v1';
+// App version: 1.0.0 (update this comment to force SW update on new release)
 
-// Relative URLs – works for any subdirectory (like /genfin/)
 const urlsToCache = [
   './',
   'index.html',
