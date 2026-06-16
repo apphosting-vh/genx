@@ -4,15 +4,17 @@
 // PATCH: Fixed 401 on userinfo, 403 on upload with fallback to new file creation
 // PATCH: Better popup blocker handling and user guidance
 // PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
+// PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
+
 (function() {
     'use strict';
 
     // ---------- IndexedDB wrapper ----------
     const DB_NAME = 'GenFinDB';
-    const DB_VERSION = 5;
+    const DB_VERSION = 6;  // bumped for new stores
     let db;
 
-    const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings'];
+    const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
 
     function openDB() {
         return new Promise((resolve, reject) => {
@@ -129,7 +131,7 @@
 
     function dbDeleteSetting(key) {
         return new Promise((resolve, reject) => {
-            const tx = db.transaction('settings', 'readonly');
+            const tx = db.transaction('settings', 'readwrite');
             const store = tx.objectStore('settings');
             const request = store.delete(key);
             request.onsuccess = () => resolve();
@@ -669,12 +671,15 @@
             const invoices = await dbGetAll('invoices');
             const purchaseOrders = await dbGetAll('purchaseOrders');
             const expenses = await dbGetAll('expenses');
+            const serviceHistory = await dbGetAll('serviceHistory');
+            const warranties = await dbGetAll('warranties');
             const profile = getProfile();
             const backupData = {
-                version: 1,
+                version: 2,  // bump version due to new stores
                 timestamp: new Date().toISOString(),
                 profile, customers, suppliers, products,
                 invoices, purchaseOrders, expenses,
+                serviceHistory, warranties
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -820,12 +825,15 @@
             gapi.client.drive.files.get({ fileId, alt: 'media' })
         );
         const backupData = response.result;
+        // Check version - if version is 1, it doesn't have service/warranty; we'll still restore but skip those.
+        // For version 2, we expect them.
+        // We'll handle gracefully: if missing, just ignore.
         if (!backupData.version || !backupData.profile ||
             !backupData.customers || !backupData.suppliers || !backupData.products ||
             !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
             throw new Error('Invalid backup file format');
         }
-        const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, and business profile).\n\nAre you absolutely sure you want to proceed?';
+        const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and business profile).\n\nAre you absolutely sure you want to proceed?';
         if (!confirm(confirmMsg)) return false;
 
         showToast('Restoring backup, please wait...', 'info');
@@ -838,6 +846,12 @@
         for (const invoice of backupData.invoices) await dbAdd('invoices', invoice);
         for (const po of backupData.purchaseOrders) await dbAdd('purchaseOrders', po);
         for (const expense of backupData.expenses) await dbAdd('expenses', expense);
+        if (backupData.serviceHistory) {
+            for (const s of backupData.serviceHistory) await dbAdd('serviceHistory', s);
+        }
+        if (backupData.warranties) {
+            for (const w of backupData.warranties) await dbAdd('warranties', w);
+        }
         saveProfile(backupData.profile);
         showToast('Backup restored successfully!', 'success');
         navigateTo('dashboard');
@@ -1129,6 +1143,35 @@
         saveProfile(profile);
     }
 
+    // ---- Service and Warranty ID generators ----
+    async function getNextServiceId() {
+        let next = await dbGetSetting('nextServiceId');
+        if (next === null || next === undefined) next = 1;
+        return 'SRV-' + String(next).padStart(4, '0');
+    }
+
+    async function incrementServiceId() {
+        let next = await dbGetSetting('nextServiceId');
+        if (next === null || next === undefined) next = 1;
+        else next++;
+        await dbSetSetting('nextServiceId', next);
+        return next;
+    }
+
+    async function getNextWarrantyId() {
+        let next = await dbGetSetting('nextWarrantyId');
+        if (next === null || next === undefined) next = 1;
+        return 'WAR-' + String(next).padStart(4, '0');
+    }
+
+    async function incrementWarrantyId() {
+        let next = await dbGetSetting('nextWarrantyId');
+        if (next === null || next === undefined) next = 1;
+        else next++;
+        await dbSetSetting('nextWarrantyId', next);
+        return next;
+    }
+
     // ---------- GST Logic ----------
     function getGstRates(stateOfSupply, partyState) {
         const isIntra = stateOfSupply && partyState && stateOfSupply.trim().toLowerCase() === partyState.trim().toLowerCase();
@@ -1304,6 +1347,7 @@
                 case 'reports': await renderReports(); break;
                 case 'profile': renderProfile(); break;
                 case 'settings': await renderSettings(); break;
+                case 'service-warranty': await renderServiceWarranty(); break;
                 default: await renderDashboard();
             }
         } catch (err) {
@@ -2479,7 +2523,7 @@
                                 <a id="viewBackupLink" href="#" target="_blank" style="display:none;">📂 View latest backup in Drive</a>
                             </div>
                             <div style="margin-top: 8px; font-size:0.75rem; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:8px;">
-                                <strong>What gets backed up:</strong> All business data (customers, suppliers, products, invoices, purchase orders, expenses, and your business profile) in a single JSON file. The backup is stored as <code>genfin_latest_backup.json</code> in your <strong>GenFinBackups</strong> folder on Drive.
+                                <strong>What gets backed up:</strong> All business data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and your business profile) in a single JSON file. The backup is stored as <code>genfin_latest_backup.json</code> in your <strong>GenFinBackups</strong> folder on Drive.
                             </div>
                             <div style="margin-top: 6px; font-size:0.75rem; background: #fef9e7; padding: 6px; border-radius: 4px; color: #7c6a2d;">
                                 💡 If the popup is blocked, please allow popups for this site and click "Connect" again.
@@ -2569,9 +2613,11 @@
             const invoices = await dbGetAll('invoices');
             const purchaseOrders = await dbGetAll('purchaseOrders');
             const expenses = await dbGetAll('expenses');
+            const serviceHistory = await dbGetAll('serviceHistory');
+            const warranties = await dbGetAll('warranties');
             const profile = getProfile();
             const backupData = {
-                version: 1,
+                version: 2,
                 timestamp: new Date().toISOString(),
                 profile: profile,
                 customers: customers,
@@ -2579,7 +2625,9 @@
                 products: products,
                 invoices: invoices,
                 purchaseOrders: purchaseOrders,
-                expenses: expenses
+                expenses: expenses,
+                serviceHistory: serviceHistory,
+                warranties: warranties
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -2603,12 +2651,13 @@
         reader.onload = async (e) => {
             try {
                 const backupData = JSON.parse(e.target.result);
+                // version 2 includes serviceHistory and warranties; version 1 doesn't.
                 if (!backupData.version || !backupData.profile || 
                     !backupData.customers || !backupData.suppliers || !backupData.products ||
                     !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
                     throw new Error('Invalid backup file format');
                 }
-                const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, and business profile).\n\nAre you absolutely sure you want to proceed?';
+                const confirmMsg = '⚠️ WARNING: This will replace ALL existing data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and business profile).\n\nAre you absolutely sure you want to proceed?';
                 if (!confirm(confirmMsg)) {
                     showToast('Import cancelled', 'info');
                     return;
@@ -2634,6 +2683,16 @@
                 }
                 for (const expense of backupData.expenses) {
                     await dbAdd('expenses', expense);
+                }
+                if (backupData.serviceHistory) {
+                    for (const s of backupData.serviceHistory) {
+                        await dbAdd('serviceHistory', s);
+                    }
+                }
+                if (backupData.warranties) {
+                    for (const w of backupData.warranties) {
+                        await dbAdd('warranties', w);
+                    }
                 }
                 saveProfile(backupData.profile);
                 showToast('Backup restored successfully!', 'success');
@@ -2991,10 +3050,335 @@
     // ---- Create sync indicator in sidebar ----
     createSyncIndicator();
 
+    // ---- NEW: Service & Warranty Module ----
+    async function renderServiceWarranty() {
+        // Render two tabs: Service History and Warranty Tracking
+        const html = `
+            <div class="page-header"><h1 class="page-title">Service & Warranty</h1></div>
+            <div class="card">
+                <div style="display: flex; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border);">
+                    <button class="btn btn-primary" id="tabService">Service History</button>
+                    <button class="btn btn-outline" id="tabWarranty">Warranty Tracking</button>
+                </div>
+                <div id="serviceWarrantyContent"></div>
+            </div>
+        `;
+        mainContent.innerHTML = html;
+        let activeTab = 'service';
+
+        async function loadTab(tab) {
+            activeTab = tab;
+            document.getElementById('tabService').className = tab === 'service' ? 'btn btn-primary' : 'btn btn-outline';
+            document.getElementById('tabWarranty').className = tab === 'warranty' ? 'btn btn-primary' : 'btn btn-outline';
+            const content = document.getElementById('serviceWarrantyContent');
+            if (tab === 'service') {
+                await renderServiceList(content);
+            } else {
+                await renderWarrantyList(content);
+            }
+        }
+
+        document.getElementById('tabService').addEventListener('click', () => loadTab('service'));
+        document.getElementById('tabWarranty').addEventListener('click', () => loadTab('warranty'));
+        await loadTab('service');
+    }
+
+    // ---- Service History ----
+    async function renderServiceList(container) {
+        const services = await dbGetAll('serviceHistory');
+        const customers = await dbGetAll('customers');
+        const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
+        // Sort by service date descending
+        services.sort((a,b) => new Date(b.serviceDate) - new Date(a.serviceDate));
+        let html = `
+            <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+                <h3>Service Records</h3>
+                <button class="btn btn-primary" id="addServiceBtn">+ New Service Record</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr style="${TABLE_HEADER_STYLE}">
+                        <th>Service ID</th><th>Customer</th><th>Serial #</th><th>Service Date</th><th>Runtime (hrs)</th><th>Next Due</th><th>Cost</th><th>Actions</th>
+                    </tr></thead>
+                    <tbody>
+        `;
+        if (!services.length) {
+            html += `<tr><td colspan="8" class="empty-state">No service records found.</td></tr>`;
+        } else {
+            services.forEach(s => {
+                html += `<tr>
+                    <td>${escapeHtml(s.serviceId)}</td>
+                    <td>${escapeHtml(customerMap[s.customerId] || '')}</td>
+                    <td>${escapeHtml(s.generatorSerialNumber || '')}</td>
+                    <td>${formatDate(s.serviceDate)}</td>
+                    <td>${s.runtimeHours || ''}</td>
+                    <td>${formatDate(s.nextServiceDueDate)}</td>
+                    <td>${formatCurrency(s.serviceCost || 0)}</td>
+                    <td>
+                        <button class="btn btn-outline btn-sm edit-service" data-id="${s.id}">Edit</button>
+                        <button class="btn btn-danger btn-sm delete-service" data-id="${s.id}">Del</button>
+                    </td>
+                </tr>`;
+            });
+        }
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+
+        document.getElementById('addServiceBtn')?.addEventListener('click', () => showServiceModal());
+        document.querySelectorAll('.edit-service').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const s = await dbGetById('serviceHistory', Number(btn.dataset.id));
+                if (s) showServiceModal(s);
+            });
+        });
+        document.querySelectorAll('.delete-service').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (confirm('Delete this service record?')) {
+                    await dbDelete('serviceHistory', Number(btn.dataset.id));
+                    await renderServiceWarranty();
+                }
+            });
+        });
+    }
+
+    async function showServiceModal(serviceData = null) {
+        const isEdit = !!serviceData;
+        const customers = await dbGetAll('customers');
+        const products = await dbGetAll('products');
+        const customerOptions = customers.map(c => `<option value="${c.id}" ${isEdit && serviceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        // For generator serial numbers, we can list from products that have serial numbers.
+        const serialOptions = products.filter(p => p.serialNumber).map(p => `<option value="${escapeHtml(p.serialNumber)}" ${isEdit && serviceData.generatorSerialNumber === p.serialNumber ? 'selected' : ''}>${escapeHtml(p.serialNumber)} (${escapeHtml(p.name)})</option>`).join('');
+        const modalHtml = `
+            <div class="modal-overlay" id="serviceModalOverlay">
+                <div class="modal">
+                    <button class="modal-close" id="closeServiceModal">✕</button>
+                    <h3>${isEdit ? 'Edit' : 'New'} Service Record</h3>
+                    <form id="serviceForm">
+                        <div class="form-grid">
+                            <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : await getNextServiceId()}" readonly></div>
+                            <div class="form-group"><label>Customer *</label><select id="serviceCustomer" required>${customerOptions}</select></div>
+                            <div class="form-group"><label>Generator Serial Number</label>
+                                <input list="serialList" id="serviceSerial" value="${isEdit ? escapeHtml(serviceData.generatorSerialNumber || '') : ''}">
+                                <datalist id="serialList">${serialOptions}</datalist>
+                            </div>
+                            <div class="form-group"><label>Service Date *</label><input type="date" id="serviceDate" value="${isEdit ? serviceData.serviceDate : new Date().toISOString().split('T')[0]}" required></div>
+                            <div class="form-group"><label>Runtime Hours</label><input type="number" step="0.1" id="serviceRuntime" value="${isEdit ? serviceData.runtimeHours || '' : ''}"></div>
+                            <div class="form-group"><label>Problem Reported</label><textarea id="serviceProblem" rows="2">${isEdit ? escapeHtml(serviceData.problemReported || '') : ''}</textarea></div>
+                            <div class="form-group"><label>Resolution</label><textarea id="serviceResolution" rows="2">${isEdit ? escapeHtml(serviceData.resolution || '') : ''}</textarea></div>
+                            <div class="form-group"><label>Parts Replaced</label><input id="serviceParts" value="${isEdit ? escapeHtml(serviceData.partsReplaced || '') : ''}"></div>
+                            <div class="form-group"><label>Next Service Due Date</label><input type="date" id="serviceNextDue" value="${isEdit ? serviceData.nextServiceDueDate : ''}"></div>
+                            <div class="form-group"><label>Service Cost (₹)</label><input type="number" step="0.01" id="serviceCost" value="${isEdit ? serviceData.serviceCost || 0 : 0}"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top:12px;">${isEdit ? 'Update' : 'Save'}</button>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.getElementById('modalContainer').innerHTML = modalHtml;
+        const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
+        document.getElementById('closeServiceModal').addEventListener('click', close);
+        document.getElementById('serviceModalOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) close(); });
+        document.getElementById('serviceForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            try {
+                const obj = {
+                    serviceId: document.getElementById('serviceId').value,
+                    customerId: parseInt(document.getElementById('serviceCustomer').value),
+                    generatorSerialNumber: document.getElementById('serviceSerial').value,
+                    serviceDate: document.getElementById('serviceDate').value,
+                    runtimeHours: parseFloat(document.getElementById('serviceRuntime').value) || 0,
+                    problemReported: document.getElementById('serviceProblem').value,
+                    resolution: document.getElementById('serviceResolution').value,
+                    partsReplaced: document.getElementById('serviceParts').value,
+                    nextServiceDueDate: document.getElementById('serviceNextDue').value,
+                    serviceCost: parseFloat(document.getElementById('serviceCost').value) || 0,
+                };
+                if (isEdit) {
+                    obj.id = serviceData.id;
+                    await dbPut('serviceHistory', obj);
+                } else {
+                    await dbAdd('serviceHistory', obj);
+                    await incrementServiceId();
+                }
+                showToast('Service record saved', 'success');
+                close();
+                await renderServiceWarranty();
+            } catch(err) {
+                showToast('Error saving service record', 'error');
+                console.error(err);
+            }
+        });
+    }
+
+    // ---- Warranty Tracking ----
+    async function renderWarrantyList(container) {
+        const warranties = await dbGetAll('warranties');
+        const customers = await dbGetAll('customers');
+        const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
+        warranties.sort((a,b) => new Date(b.warrantyStartDate) - new Date(a.warrantyStartDate));
+        let html = `
+            <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+                <h3>Warranty Records</h3>
+                <button class="btn btn-primary" id="addWarrantyBtn">+ New Warranty</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr style="${TABLE_HEADER_STYLE}">
+                        <th>Warranty ID</th><th>Customer</th><th>Serial #</th><th>Purchase Date</th><th>Start Date</th><th>End Date</th><th>Coverage</th><th>Actions</th>
+                    </tr></thead>
+                    <tbody>
+        `;
+        if (!warranties.length) {
+            html += `<tr><td colspan="8" class="empty-state">No warranty records found.</td></tr>`;
+        } else {
+            warranties.forEach(w => {
+                html += `<tr>
+                    <td>${escapeHtml(w.warrantyId)}</td>
+                    <td>${escapeHtml(customerMap[w.customerId] || '')}</td>
+                    <td>${escapeHtml(w.generatorSerialNumber || '')}</td>
+                    <td>${formatDate(w.purchaseDate)}</td>
+                    <td>${formatDate(w.warrantyStartDate)}</td>
+                    <td>${formatDate(w.warrantyEndDate)}</td>
+                    <td>${escapeHtml(w.coverageDetails || '')}</td>
+                    <td>
+                        <button class="btn btn-outline btn-sm edit-warranty" data-id="${w.id}">Edit</button>
+                        <button class="btn btn-danger btn-sm delete-warranty" data-id="${w.id}">Del</button>
+                    </td>
+                </tr>`;
+            });
+        }
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+
+        document.getElementById('addWarrantyBtn')?.addEventListener('click', () => showWarrantyModal());
+        document.querySelectorAll('.edit-warranty').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const w = await dbGetById('warranties', Number(btn.dataset.id));
+                if (w) showWarrantyModal(w);
+            });
+        });
+        document.querySelectorAll('.delete-warranty').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (confirm('Delete this warranty record?')) {
+                    await dbDelete('warranties', Number(btn.dataset.id));
+                    await renderServiceWarranty();
+                }
+            });
+        });
+    }
+
+    async function showWarrantyModal(warrantyData = null) {
+        const isEdit = !!warrantyData;
+        const customers = await dbGetAll('customers');
+        const products = await dbGetAll('products');
+        const customerOptions = customers.map(c => `<option value="${c.id}" ${isEdit && warrantyData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        const serialOptions = products.filter(p => p.serialNumber).map(p => `<option value="${escapeHtml(p.serialNumber)}" ${isEdit && warrantyData.generatorSerialNumber === p.serialNumber ? 'selected' : ''}>${escapeHtml(p.serialNumber)} (${escapeHtml(p.name)})</option>`).join('');
+        const modalHtml = `
+            <div class="modal-overlay" id="warrantyModalOverlay">
+                <div class="modal">
+                    <button class="modal-close" id="closeWarrantyModal">✕</button>
+                    <h3>${isEdit ? 'Edit' : 'New'} Warranty</h3>
+                    <form id="warrantyForm">
+                        <div class="form-grid">
+                            <div class="form-group"><label>Warranty ID</label><input type="text" id="warrantyId" value="${isEdit ? warrantyData.warrantyId : await getNextWarrantyId()}" readonly></div>
+                            <div class="form-group"><label>Customer *</label><select id="warrantyCustomer" required>${customerOptions}</select></div>
+                            <div class="form-group"><label>Generator Serial Number</label>
+                                <input list="serialListW" id="warrantySerial" value="${isEdit ? escapeHtml(warrantyData.generatorSerialNumber || '') : ''}">
+                                <datalist id="serialListW">${serialOptions}</datalist>
+                            </div>
+                            <div class="form-group"><label>Purchase Date</label><input type="date" id="warrantyPurchaseDate" value="${isEdit ? warrantyData.purchaseDate : ''}"></div>
+                            <div class="form-group"><label>Warranty Start Date *</label><input type="date" id="warrantyStartDate" value="${isEdit ? warrantyData.warrantyStartDate : ''}" required></div>
+                            <div class="form-group"><label>Warranty End Date *</label><input type="date" id="warrantyEndDate" value="${isEdit ? warrantyData.warrantyEndDate : ''}" required></div>
+                            <div class="form-group full"><label>Coverage Details</label><textarea id="warrantyCoverage" rows="3">${isEdit ? escapeHtml(warrantyData.coverageDetails || '') : ''}</textarea></div>
+                            <div class="form-group full"><label>Claim History</label><textarea id="warrantyClaims" rows="3">${isEdit ? escapeHtml(warrantyData.claimHistory || '') : ''}</textarea></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top:12px;">${isEdit ? 'Update' : 'Save'}</button>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.getElementById('modalContainer').innerHTML = modalHtml;
+        const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
+        document.getElementById('closeWarrantyModal').addEventListener('click', close);
+        document.getElementById('warrantyModalOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) close(); });
+        document.getElementById('warrantyForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            try {
+                const obj = {
+                    warrantyId: document.getElementById('warrantyId').value,
+                    customerId: parseInt(document.getElementById('warrantyCustomer').value),
+                    generatorSerialNumber: document.getElementById('warrantySerial').value,
+                    purchaseDate: document.getElementById('warrantyPurchaseDate').value,
+                    warrantyStartDate: document.getElementById('warrantyStartDate').value,
+                    warrantyEndDate: document.getElementById('warrantyEndDate').value,
+                    coverageDetails: document.getElementById('warrantyCoverage').value,
+                    claimHistory: document.getElementById('warrantyClaims').value,
+                };
+                if (isEdit) {
+                    obj.id = warrantyData.id;
+                    await dbPut('warranties', obj);
+                } else {
+                    await dbAdd('warranties', obj);
+                    await incrementWarrantyId();
+                }
+                showToast('Warranty record saved', 'success');
+                close();
+                await renderServiceWarranty();
+            } catch(err) {
+                showToast('Error saving warranty', 'error');
+                console.error(err);
+            }
+        });
+    }
+
+    // ---- Add navigation item dynamically ----
+    function addServiceWarrantyNav() {
+        const manageSection = document.querySelector('.nav-section .nav-label:contains("Manage")');
+        const navItems = document.querySelectorAll('.nav-section .nav-item');
+        // Find the position after "Products" or before "Reports"
+        let productsItem = null;
+        let reportsItem = null;
+        navItems.forEach(item => {
+            if (item.dataset.page === 'products') productsItem = item;
+            if (item.dataset.page === 'reports') reportsItem = item;
+        });
+        if (productsItem && reportsItem) {
+            const newNav = document.createElement('div');
+            newNav.className = 'nav-item';
+            newNav.dataset.page = 'service-warranty';
+            newNav.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="20" rx="2.18"/>
+                    <line x1="8" y1="2" x2="8" y2="22"/>
+                    <line x1="16" y1="2" x2="16" y2="22"/>
+                    <line x1="2" y1="8" x2="22" y2="8"/>
+                    <line x1="2" y1="16" x2="22" y2="16"/>
+                    <line x1="2" y1="12" x2="8" y2="12"/>
+                    <line x1="16" y1="12" x2="22" y2="12"/>
+                </svg>
+                Service & Warranty
+            `;
+            // Insert after products item
+            productsItem.parentNode.insertBefore(newNav, reportsItem);
+        } else {
+            // Fallback: append to the last nav-section
+            const lastSection = document.querySelector('.nav-section:last-child');
+            if (lastSection) {
+                const newNav = document.createElement('div');
+                newNav.className = 'nav-item';
+                newNav.dataset.page = 'service-warranty';
+                newNav.innerHTML = '🔧 Service & Warranty';
+                lastSection.appendChild(newNav);
+            }
+        }
+    }
+
     // Start app (non-blocking Google Drive init)
     openDB().then(() => {
         updateOnlineStatus();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
+        // Add navigation item
+        addServiceWarrantyNav();
         navigateTo('dashboard');
     }).catch(err => {
         console.error('IndexedDB error:', err);
