@@ -5,7 +5,7 @@
 // PATCH: Better popup blocker handling and user guidance
 // PATCH: Enhanced Product Inventory with full generator details, stock, supplier linking
 // PATCH: Added Service & Warranty History module with full CRUD, auto IDs, backup/restore
-// PATCH: Removed invalid :contains() selector for nav insertion
+// PATCH: Removed dynamic navigation injection (now static in index.html)
 
 (function() {
     'use strict';
@@ -3332,51 +3332,10 @@
         });
     }
 
-    // ---- Add navigation item dynamically (fixed :contains removal) ----
-    function addServiceWarrantyNav() {
-        const navItems = document.querySelectorAll('.nav-section .nav-item');
-        let productsItem = null;
-        let reportsItem = null;
-        navItems.forEach(item => {
-            if (item.dataset.page === 'products') productsItem = item;
-            if (item.dataset.page === 'reports') reportsItem = item;
-        });
-        if (productsItem && reportsItem) {
-            const newNav = document.createElement('div');
-            newNav.className = 'nav-item';
-            newNav.dataset.page = 'service-warranty';
-            newNav.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="2" y="2" width="20" height="20" rx="2.18"/>
-                    <line x1="8" y1="2" x2="8" y2="22"/>
-                    <line x1="16" y1="2" x2="16" y2="22"/>
-                    <line x1="2" y1="8" x2="22" y2="8"/>
-                    <line x1="2" y1="16" x2="22" y2="16"/>
-                    <line x1="2" y1="12" x2="8" y2="12"/>
-                    <line x1="16" y1="12" x2="22" y2="12"/>
-                </svg>
-                Service & Warranty
-            `;
-            productsItem.parentNode.insertBefore(newNav, reportsItem);
-        } else {
-            // fallback: append to last nav-section
-            const lastSection = document.querySelector('.nav-section:last-child');
-            if (lastSection) {
-                const newNav = document.createElement('div');
-                newNav.className = 'nav-item';
-                newNav.dataset.page = 'service-warranty';
-                newNav.innerHTML = '🔧 Service & Warranty';
-                lastSection.appendChild(newNav);
-            }
-        }
-    }
-
-    // Start app (non-blocking Google Drive init)
+    // ---- Start app (no dynamic nav injection) ----
     openDB().then(() => {
         updateOnlineStatus();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
-        // Add navigation item
-        addServiceWarrantyNav();
         navigateTo('dashboard');
     }).catch(err => {
         console.error('IndexedDB error:', err);
