@@ -6,9 +6,67 @@
 // GST 0% fix, View modal table header fix, File System Access API for local disk sync
 // + Production-grade service worker with PWA support
 // + Product transaction view (Invoices & Purchase Orders linked to inventory items)
+// + Modern SVG icons replacing all emoji icons in the UI
 
 (function() {
     'use strict';
+
+    // ---------- SVG Icon Definitions ----------
+    const ICONS = {
+        plus: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>`,
+        export: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>`,
+        import: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" /></svg>`, // upload (rotated)
+        cloud: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>`,
+        save: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>`,
+        trash: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`,
+        refresh: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`,
+        check: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+        cross: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+        warning: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`,
+        folder: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>`,
+        calendar: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>`,
+        clock: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+        sync: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`, // refresh
+        spinner: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="animate-spin"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`, // we can add animation via CSS
+        close: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>`,
+        power: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>` // optional
+    };
+
+    function iconSvg(name, className = '') {
+        const svg = ICONS[name] || '';
+        return `<span class="icon ${className}">${svg}</span>`;
+    }
+
+    // Inject icon styles
+    function injectIconStyles() {
+        const style = document.createElement('style');
+        style.textContent = `
+            .icon {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                vertical-align: middle;
+                margin-right: 4px;
+                line-height: 1;
+                flex-shrink: 0;
+            }
+            .icon svg {
+                width: 100%;
+                height: 100%;
+                stroke: currentColor;
+                fill: none;
+                stroke-width: 2;
+            }
+            .icon.animate-spin svg {
+                animation: spin 1s linear infinite;
+            }
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
 
     // ---------- App Version ----------
     const APP_VERSION = '1.0.0'; // Update this on each release
@@ -264,7 +322,7 @@
         toast.className = 'toast toast-info toast-update';
         toast.style.cursor = 'pointer';
         toast.innerHTML = `
-            <span>🔄 New version ${newVersion} available! </span>
+            <span>${iconSvg('refresh')} New version ${newVersion} available! </span>
             <button class="btn btn-sm btn-primary" style="margin-left:10px; padding:2px 12px;">Update Now</button>
         `;
         const updateBtn = toast.querySelector('button');
@@ -1057,7 +1115,7 @@
             const modalHtml = `
                 <div class="modal-overlay" id="restoreModal">
                     <div class="modal">
-                        <button class="modal-close" id="closeRestoreModal">✕</button>
+                        <button class="modal-close" id="closeRestoreModal">${iconSvg('close')}</button>
                         <h3>Restore from Google Drive</h3>
                         <select id="backupSelect" style="width:100%; margin-bottom:16px;">
                             ${files.map(f => `<option value="${f.id}">${f.name} (${new Date(f.createdTime).toLocaleString()})</option>`).join('')}
@@ -1152,7 +1210,7 @@
             const meta = await getLatestBackupMetadata();
             if (meta && meta.modifiedTime) {
                 const d = new Date(meta.modifiedTime);
-                statusEl.textContent = '✅ ' + d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                statusEl.innerHTML = `${iconSvg('check')} ${d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
                 statusEl.style.color = '#10b981';
             } else {
                 statusEl.textContent = 'No backup found in Drive';
@@ -1183,18 +1241,42 @@
         const indicator = document.getElementById('syncIndicator');
         if (!indicator) return;
         const status = syncState.status;
-        let icon = '☁️';
+        let iconHtml = '';
         let color = '#6b7280';
         let tooltip = 'Not connected';
         switch (status) {
-            case 'idle': color = '#6b7280'; tooltip = 'Connected, idle'; break;
-            case 'syncing': icon = '⏳'; color = '#f59e0b'; tooltip = 'Syncing...'; break;
-            case 'success': icon = '✅'; color = '#10b981'; tooltip = 'Last sync: ' + (syncState.lastSuccessAt ? new Date(syncState.lastSuccessAt).toLocaleString() : 'never'); break;
-            case 'error': icon = '❌'; color = '#ef4444'; tooltip = 'Sync error: ' + (syncState.lastError || 'unknown'); break;
-            case 'expired': icon = '🕒'; color = '#f59e0b'; tooltip = 'Token expired – refreshing'; break;
-            default: color = '#6b7280'; tooltip = 'Not connected'; break;
+            case 'idle':
+                iconHtml = iconSvg('cloud');
+                color = '#6b7280';
+                tooltip = 'Connected, idle';
+                break;
+            case 'syncing':
+                iconHtml = iconSvg('refresh', 'animate-spin');
+                color = '#f59e0b';
+                tooltip = 'Syncing...';
+                break;
+            case 'success':
+                iconHtml = iconSvg('check');
+                color = '#10b981';
+                tooltip = 'Last sync: ' + (syncState.lastSuccessAt ? new Date(syncState.lastSuccessAt).toLocaleString() : 'never');
+                break;
+            case 'error':
+                iconHtml = iconSvg('cross');
+                color = '#ef4444';
+                tooltip = 'Sync error: ' + (syncState.lastError || 'unknown');
+                break;
+            case 'expired':
+                iconHtml = iconSvg('clock');
+                color = '#f59e0b';
+                tooltip = 'Token expired – refreshing';
+                break;
+            default:
+                iconHtml = iconSvg('cloud');
+                color = '#6b7280';
+                tooltip = 'Not connected';
+                break;
         }
-        indicator.innerHTML = `<span style="color:${color};">${icon}</span>`;
+        indicator.innerHTML = `<span style="color:${color};">${iconHtml}</span>`;
         indicator.title = tooltip;
         updateSettingsUI();
     }
@@ -1616,8 +1698,6 @@
         }
     }
 
-    // ---------- Dashboard has been removed ----------
-
     // ---------- Invoices ----------
     async function renderInvoices() {
         try {
@@ -1629,7 +1709,7 @@
             
             const renderTable = () => {
                 let html = `
-                    <div class="page-header"><h1 class="page-title">Invoices</h1><button class="btn btn-primary" id="addInvoiceBtn">+ New Invoice</button></div>
+                    <div class="page-header"><h1 class="page-title">Invoices</h1><button class="btn btn-primary" id="addInvoiceBtn">${iconSvg('plus')} New Invoice</button></div>
                     <div class="card">
                         <div class="filter-bar" style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end;">
                             <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="invFromDate" value="${fromDate}" style="padding: 8px;"></div>
@@ -1659,7 +1739,7 @@
                                 <button class="btn btn-primary btn-sm export-invoice" data-id="${inv.id}">PDF</button>
                                 ${inv.paymentStatus !== 'Paid' ? `<button class="btn btn-success btn-sm mark-paid-btn" data-id="${inv.id}" data-status="Paid">Paid</button>` : ''}
                                 ${inv.paymentStatus === 'Paid' ? `<button class="btn btn-warning btn-sm mark-unpaid-btn" data-id="${inv.id}" data-status="Unpaid">Unpaid</button>` : ''}
-                                <button class="btn btn-danger btn-sm delete-invoice" data-id="${inv.id}">Del</button>
+                                <button class="btn btn-danger btn-sm delete-invoice" data-id="${inv.id}">${iconSvg('trash')}</button>
                             </td>
                         </tr>`;
                     });
@@ -1723,7 +1803,6 @@
         }
     }
 
-    // FIX: View Invoice Modal - table headers with black text on white background
     async function showInvoiceViewModal(id) {
         try {
             const inv = await dbGetById('invoices', id);
@@ -1769,7 +1848,7 @@
             modalContainer.innerHTML = `
                 <div class="modal-overlay" id="viewInvModalOverlay">
                     <div class="modal" style="max-width:800px;">
-                        <button class="modal-close" id="closeViewInvModal">✕</button>
+                        <button class="modal-close" id="closeViewInvModal">${iconSvg('close')}</button>
                         <div style="max-height:70vh; overflow-y:auto;">${content}</div>
                         <div style="text-align:right; margin-top:16px;">
                             <button class="btn btn-secondary" id="editViewInvBtn">Edit</button>
@@ -1871,7 +1950,7 @@
             <div class="form-group" style="flex:1; min-width:70px;"><label>Qty</label><input type="number" class="item-qty" value="${qty}" step="1" min="1" style="width:100%;"></div>
             <div class="form-group" style="flex:1; min-width:80px;"><label>Rate (₹)</label><input type="number" class="item-rate" value="${rate}" step="0.01" min="0" style="width:100%;"></div>
             <div class="form-group" style="flex:1; min-width:70px;"><label>GST %</label><select class="item-gst" style="width:100%;">${[0,5,12,18,28].map(g => `<option value="${g}" ${g == gst ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
-            <button type="button" class="btn btn-danger btn-sm remove-item-row" style="margin-bottom:2px;">✕</button>
+            <button type="button" class="btn btn-danger btn-sm remove-item-row" style="margin-bottom:2px;">${iconSvg('cross')}</button>
         </div>`;
     }
 
@@ -1885,7 +1964,7 @@
             <div class="form-group" style="flex:1; min-width:70px;"><label>Qty</label><input type="number" class="item-qty" value="${qty}" step="1" min="1" style="width:100%;"></div>
             <div class="form-group" style="flex:1; min-width:80px;"><label>Rate (₹)</label><input type="number" class="item-rate" value="${rate}" step="0.01" min="0" style="width:100%;"></div>
             <div class="form-group" style="flex:1; min-width:70px;"><label>GST %</label><select class="item-gst" style="width:100%;">${[0,5,12,18,28].map(g => `<option value="${g}" ${g == gst ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
-            <button type="button" class="btn btn-danger btn-sm remove-row" style="margin-bottom:2px;">✕</button>
+            <button type="button" class="btn btn-danger btn-sm remove-row" style="margin-bottom:2px;">${iconSvg('cross')}</button>
         </div>`;
     }
 
@@ -1906,7 +1985,7 @@
             const modalHtml = `
                 <div class="modal-overlay" id="invoiceModalOverlay">
                     <div class="modal">
-                        <button class="modal-close" id="closeInvoiceModal">✕</button>
+                        <button class="modal-close" id="closeInvoiceModal">${iconSvg('close')}</button>
                         <h3>${title}</h3>
                         <form id="invoiceForm">
                             <div class="form-grid">
@@ -1919,7 +1998,7 @@
                             </div>
                             <h4 style="margin-top:16px;">Items</h4>
                             <div id="invoiceItemsContainer">${(isEdit ? invoiceData.items : []).map((item, idx) => invoiceItemRow(item, idx, products)).join('')}</div>
-                            <button type="button" class="btn btn-outline btn-sm" id="addInvoiceItem">+ Add Item</button>
+                            <button type="button" class="btn btn-outline btn-sm" id="addInvoiceItem">${iconSvg('plus')} Add Item</button>
                             <div class="card" style="margin-top:16px; background:#f8fafc;">
                                 <div class="form-grid span-3">
                                     <div class="form-group"><label>Subtotal (Taxable)</label><div style="font-weight:700; font-size:1rem;" id="invSubtotalDisplay">₹ 0.00</div></div>
@@ -2089,7 +2168,7 @@
             let filteredPOs = [...allPOs];
             
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><button class="btn btn-primary" id="addPOBtn">+ New PO</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><button class="btn btn-primary" id="addPOBtn">${iconSvg('plus')} New PO</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="poFromDate" value="${fromDate}" style="padding:8px;"></div>
                     <div class="form-group" style="margin-bottom:0;"><label>To Date</label><input type="date" id="poToDate" value="${toDate}" style="padding:8px;"></div>
@@ -2102,7 +2181,7 @@
                     else if (po.status === 'Received' || po.status === 'Cancelled') statusActions = `<button class="btn btn-outline btn-sm mark-pending-btn" data-id="${po.id}" data-status="Pending">Reopen</button>`;
                     html += `<tr><td>${po.poNumber}</td><td>${formatDate(po.date)}</td><td>${supplierMap[po.supplierId] || ''}</td><td>${formatCurrency(po.grandTotal)}</td><td>${po.status}</td>
                             <td><button class="btn btn-outline btn-sm view-po" data-id="${po.id}">View</button><button class="btn btn-secondary btn-sm edit-po" data-id="${po.id}">Edit</button>
-                            <button class="btn btn-primary btn-sm export-po" data-id="${po.id}">PDF</button>${statusActions}<button class="btn btn-danger btn-sm delete-po" data-id="${po.id}">Del</button></td></tr>`;
+                            <button class="btn btn-primary btn-sm export-po" data-id="${po.id}">PDF</button>${statusActions}<button class="btn btn-danger btn-sm delete-po" data-id="${po.id}">${iconSvg('trash')}</button></td></tr>`;
                 });
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
@@ -2125,7 +2204,6 @@
         try { const po = await dbGetById('purchaseOrders', id); if (!po) return; po.status = newStatus; await dbPut('purchaseOrders', po); showToast(`PO status updated to ${newStatus}`, 'success'); await renderPurchaseOrders(); } catch(err) { showToast('Error updating PO status', 'error'); }
     }
 
-    // FIX: View PO Modal - table headers with black text on white background
     async function showPOViewModal(id) {
         try {
             const po = await dbGetById('purchaseOrders', id);
@@ -2161,7 +2239,7 @@
                 </div>
             `;
             const modalContainer = document.getElementById('modalContainer');
-            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">✕</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-primary" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-outline" id="closeViewPOBtn2">Close</button></div></div></div>`;
+            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">${iconSvg('close')}</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-primary" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-outline" id="closeViewPOBtn2">Close</button></div></div></div>`;
             const close = () => { modalContainer.innerHTML = ''; };
             document.getElementById('closeViewPOModal').addEventListener('click', close);
             document.getElementById('closeViewPOBtn2').addEventListener('click', close);
@@ -2233,13 +2311,13 @@
             const isEdit = !!poData;
             const defStatus = isEdit ? poData.status : 'Pending';
             const defDiscount = isEdit && poData.discount !== undefined ? poData.discount : 0;
-            const modalHtml = `<div class="modal-overlay" id="poModalOverlay"><div class="modal"><button class="modal-close" id="closePOModal">✕</button><h3>${isEdit ? 'Edit' : 'New'} Purchase Order</h3>
+            const modalHtml = `<div class="modal-overlay" id="poModalOverlay"><div class="modal"><button class="modal-close" id="closePOModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'New'} Purchase Order</h3>
                 <form id="poForm"><div class="form-grid"><div class="form-group"><label>PO Number</label><input type="text" id="poNumber" value="${isEdit ? poData.poNumber : await getNextPONumber()}" ${isEdit ? '' : 'readonly'}></div>
                 <div class="form-group"><label>Date</label><input type="date" id="poDate" value="${isEdit ? poData.date : new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Supplier</label><select id="poSupplier">${suppliers.map(s => `<option value="${s.id}" ${isEdit && poData.supplierId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
                 <div class="form-group"><label>Status</label><select id="poStatus">${PO_STATUSES.map(s => `<option value="${s}" ${s === defStatus ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
                 <h4>Items</h4><div id="poItemsContainer">${(isEdit ? poData.items : []).map((it, idx) => poItemRow(it, idx, products)).join('')}</div>
-                <button type="button" class="btn btn-outline btn-sm" id="addPOItem">+ Add Item</button>
+                <button type="button" class="btn btn-outline btn-sm" id="addPOItem">${iconSvg('plus')} Add Item</button>
                 <div class="card" style="margin-top:16px; background:#f8fafc;"><div class="form-grid span-3"><div class="form-group"><label>Subtotal (Taxable)</label><div style="font-weight:700;" id="poSubtotalDisplay">₹ 0.00</div></div>
                 <div class="form-group"><label>Discount (₹)</label><input type="number" id="poDiscount" value="${defDiscount}" step="0.01"></div>
                 <div class="form-group"><label>Total Tax</label><div style="font-weight:700;" id="poTaxDisplay">₹ 0.00</div></div>
@@ -2364,13 +2442,13 @@
             let fromDate = '', toDate = '';
             let filteredExpenses = [...allExpenses];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Expenses</h1><button class="btn btn-primary" id="addExpenseBtn">+ Log Expense</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Expenses</h1><button class="btn btn-primary" id="addExpenseBtn">${iconSvg('plus')} Log Expense</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="expFromDate" value="${fromDate}"></div>
                     <div class="form-group" style="margin-bottom:0;"><label>To Date</label><input type="date" id="expToDate" value="${toDate}"></div>
                     <button class="btn btn-primary" id="applyExpFilter">Apply Filter</button><button class="btn btn-secondary" id="clearExpFilter">Clear</button>
                 </div><div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Actions</th></tr></thead><tbody>`;
-                filteredExpenses.sort((a,b)=>b.id - a.id).forEach(e => { html += `<tr><td>${formatDate(e.date)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description)}</td><td>${formatCurrency(e.amount)}</td><td><button class="btn btn-danger btn-sm delete-expense" data-id="${e.id}">Del</button></td></tr>`; });
+                filteredExpenses.sort((a,b)=>b.id - a.id).forEach(e => { html += `<tr><td>${formatDate(e.date)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description)}</td><td>${formatCurrency(e.amount)}</td><td><button class="btn btn-danger btn-sm delete-expense" data-id="${e.id}">${iconSvg('trash')}</button></td></tr>`; });
                 if (!filteredExpenses.length) html += `<tr><td colspan="5" class="empty-state">No expenses in date range.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
@@ -2391,7 +2469,7 @@
         }
         try {
             const isEdit = !!expData;
-            const modalHtml = `<div class="modal-overlay" id="expModalOverlay"><div class="modal"><button class="modal-close" id="closeExpModal">✕</button><h3>${isEdit ? 'Edit' : 'Log'} Expense</h3>
+            const modalHtml = `<div class="modal-overlay" id="expModalOverlay"><div class="modal"><button class="modal-close" id="closeExpModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'Log'} Expense</h3>
                 <form id="expForm"><div class="form-grid"><div class="form-group"><label>Date</label><input type="date" id="expDate" value="${isEdit ? expData.date : new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Category</label><input id="expCategory" value="${isEdit ? escapeHtml(expData.category) : ''}" placeholder="e.g. Parts, Labour, Rent"></div>
                 <div class="form-group"><label>Description</label><input id="expDesc" value="${isEdit ? escapeHtml(expData.description) : ''}"></div>
@@ -2419,11 +2497,11 @@
             let searchTerm = '';
             let filteredCustomers = [...allCustomers];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Customers</h1><button class="btn btn-primary" id="addCustomerBtn">+ Add Customer</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Customers</h1><button class="btn btn-primary" id="addCustomerBtn">${iconSvg('plus')} Add Customer</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name</label><input type="text" id="custSearch" value="${escapeHtml(searchTerm)}" placeholder="Type customer name..."></div>
                 <button class="btn btn-primary" id="applyCustSearch">Search</button><button class="btn btn-secondary" id="clearCustSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Name</th><th>GSTIN</th><th>State</th><th>Phone</th><th>Actions</th></tr></thead><tbody>`;
-                filteredCustomers.forEach(c => { html += `<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.gstin)}</td><td>${escapeHtml(c.state)}</td><td>${escapeHtml(c.phone)}</td><td><button class="btn btn-outline btn-sm edit-customer" data-id="${c.id}">Edit</button> <button class="btn btn-danger btn-sm delete-customer" data-id="${c.id}">Del</button></td></tr>`; });
+                filteredCustomers.forEach(c => { html += `<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.gstin)}</td><td>${escapeHtml(c.state)}</td><td>${escapeHtml(c.phone)}</td><td><button class="btn btn-outline btn-sm edit-customer" data-id="${c.id}">Edit</button> <button class="btn btn-danger btn-sm delete-customer" data-id="${c.id}">${iconSvg('trash')}</button></td></tr>`; });
                 if (!filteredCustomers.length) html += `<tr><td colspan="5" class="empty-state">No customers found.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
@@ -2442,7 +2520,7 @@
     async function showCustomerModal(custData = null) {
         try {
             const isEdit = !!custData;
-            const modalHtml = `<div class="modal-overlay" id="custModalOverlay"><div class="modal"><button class="modal-close" id="closeCustModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Customer</h3>
+            const modalHtml = `<div class="modal-overlay" id="custModalOverlay"><div class="modal"><button class="modal-close" id="closeCustModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'Add'} Customer</h3>
                 <form id="custForm"><div class="form-grid"><div class="form-group"><label>Name *</label><input id="custName" value="${isEdit ? escapeHtml(custData.name) : ''}" required></div>
                 <div class="form-group"><label>GSTIN</label><input id="custGstin" value="${isEdit ? escapeHtml(custData.gstin) : ''}"></div>
                 <div class="form-group"><label>State</label><input id="custState" value="${isEdit ? escapeHtml(custData.state) : ''}"></div>
@@ -2477,11 +2555,11 @@
             let searchTerm = '';
             let filteredSuppliers = [...allSuppliers];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Suppliers</h1><button class="btn btn-primary" id="addSupplierBtn">+ Add Supplier</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Suppliers</h1><button class="btn btn-primary" id="addSupplierBtn">${iconSvg('plus')} Add Supplier</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name</label><input type="text" id="supSearch" value="${escapeHtml(searchTerm)}" placeholder="Type supplier name..."></div>
                 <button class="btn btn-primary" id="applySupSearch">Search</button><button class="btn btn-secondary" id="clearSupSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Name</th><th>GSTIN</th><th>State</th><th>Phone</th><th>Actions</th></tr></thead><tbody>`;
-                filteredSuppliers.forEach(s => { html += `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.gstin)}</td><td>${escapeHtml(s.state)}</td><td>${escapeHtml(s.phone)}</td><td><button class="btn btn-outline btn-sm edit-supplier" data-id="${s.id}">Edit</button> <button class="btn btn-danger btn-sm delete-supplier" data-id="${s.id}">Del</button></td></tr>`; });
+                filteredSuppliers.forEach(s => { html += `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.gstin)}</td><td>${escapeHtml(s.state)}</td><td>${escapeHtml(s.phone)}</td><td><button class="btn btn-outline btn-sm edit-supplier" data-id="${s.id}">Edit</button> <button class="btn btn-danger btn-sm delete-supplier" data-id="${s.id}">${iconSvg('trash')}</button></td></tr>`; });
                 if (!filteredSuppliers.length) html += `<tr><td colspan="5" class="empty-state">No suppliers found.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
@@ -2500,7 +2578,7 @@
     async function showSupplierModal(supData = null) {
         try {
             const isEdit = !!supData;
-            const modalHtml = `<div class="modal-overlay" id="supModalOverlay"><div class="modal"><button class="modal-close" id="closeSupModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Supplier</h3>
+            const modalHtml = `<div class="modal-overlay" id="supModalOverlay"><div class="modal"><button class="modal-close" id="closeSupModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'Add'} Supplier</h3>
                 <form id="supForm"><div class="form-grid"><div class="form-group"><label>Name *</label><input id="supName" value="${isEdit ? escapeHtml(supData.name) : ''}" required></div>
                 <div class="form-group"><label>GSTIN</label><input id="supGstin" value="${isEdit ? escapeHtml(supData.gstin) : ''}"></div>
                 <div class="form-group"><label>State</label><input id="supState" value="${isEdit ? escapeHtml(supData.state) : ''}"></div>
@@ -2537,7 +2615,7 @@
             let searchTerm = '';
             let filteredProducts = [...allProducts];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><button class="btn btn-primary" id="addProductBtn">+ Add Item</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><button class="btn btn-primary" id="addProductBtn">${iconSvg('plus')} Add Item</button></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
@@ -2567,7 +2645,7 @@
                         <td>
                             <button class="btn btn-outline btn-sm edit-product" data-id="${p.id}">Edit</button>
                             <button class="btn btn-info btn-sm view-transactions" data-id="${p.id}" style="background:#0ea5e9; color:white; border-color:#0ea5e9;">Transactions</button>
-                            <button class="btn btn-danger btn-sm delete-product" data-id="${p.id}">Del</button>
+                            <button class="btn btn-danger btn-sm delete-product" data-id="${p.id}">${iconSvg('trash')}</button>
                         </td>
                     </tr>`;
                 });
@@ -2629,7 +2707,7 @@
             const modalContent = `
                 <div class="modal-overlay" id="productTransactionsModal">
                     <div class="modal" style="max-width: 900px;">
-                        <button class="modal-close" id="closeProductTransactionsModal">✕</button>
+                        <button class="modal-close" id="closeProductTransactionsModal">${iconSvg('close')}</button>
                         <h3>Transactions for: ${escapeHtml(product.name)}</h3>
                         <p style="color: #6b7280; margin-bottom: 16px;">SKU: ${escapeHtml(product.sku || 'N/A')} | Brand: ${escapeHtml(product.brand || 'N/A')}</p>
 
@@ -2730,7 +2808,7 @@
                 else defaultStatus = 'In Stock';
             }
 
-            const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Item</h3>
+            const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'Add'} Item</h3>
                 <form id="prodForm">
                     <div class="form-grid">
                         <div class="form-group"><label>Type</label><select id="prodType">${PRODUCT_TYPES.map(t => `<option value="${t}" ${isEdit && prodData.type === t ? 'selected' : (t === 'Product' && !isEdit ? 'selected' : '')}>${t}</option>`).join('')}</select></div>
@@ -3089,7 +3167,7 @@
         toast.className = 'toast toast-warning toast-local-file-reconnect';
         toast.style.cursor = 'pointer';
         toast.innerHTML = `
-            <span>📁 Local file sync needs attention. </span>
+            <span>${iconSvg('folder')} Local file sync needs attention. </span>
             <button class="btn btn-sm btn-primary" style="margin-left:10px; padding:2px 12px;">Reconnect</button>
         `;
         const reconnectBtn = toast.querySelector('button');
@@ -3189,8 +3267,8 @@
                 <h3>Local Backup & Restore</h3>
                 <p style="margin-bottom: 16px; color: #6b7280;">Export all your business data as a JSON file, or restore from a previously saved backup.</p>
                 <div style="display: flex; gap: 16px; flex-wrap: wrap;">
-                    <button class="btn btn-primary" id="exportBackupBtn">📥 Export Backup (JSON)</button>
-                    <button class="btn btn-secondary" id="importBackupBtn">📤 Import Backup</button>
+                    <button class="btn btn-primary" id="exportBackupBtn">${iconSvg('export')} Export Backup (JSON)</button>
+                    <button class="btn btn-secondary" id="importBackupBtn">${iconSvg('import')} Import Backup</button>
                     <input type="file" id="backupFileInput" accept=".json" style="display: none;">
                 </div>
                 <div style="margin-top: 24px; padding: 12px; background: #fef3c7; border-radius: 8px; font-size: 0.8rem; color: #92400e;">
@@ -3199,7 +3277,7 @@
             </div>
 
             <div class="card">
-                <h3>☁️ Google Drive Backup</h3>
+                <h3>${iconSvg('cloud')} Google Drive Backup</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
                     <div>
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -3254,7 +3332,7 @@
             </div>
 
             <div class="card">
-                <h3>💾 Local Disk Sync (Save to a JSON file on your computer)</h3>
+                <h3>${iconSvg('save')} Local Disk Sync (Save to a JSON file on your computer)</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">
                     Choose a location on your hard drive to automatically save all your business data as a JSON file. 
                     Every change you make will be written to this file (with a 2-second debounce). 
@@ -3276,9 +3354,9 @@
             </div>
 
             <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
-                <h3 style="color: #dc2626;">⚠️ Reset & Delete Data</h3>
+                <h3 style="color: #dc2626;">${iconSvg('trash')} Reset & Delete Data</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">Permanently erase all business data and reset the app to a fresh state. This action cannot be undone.</p>
-                <button class="btn btn-danger" id="resetDataBtn">🗑️ Delete All Data & Reset</button>
+                <button class="btn btn-danger" id="resetDataBtn">${iconSvg('trash')} Delete All Data & Reset</button>
             </div>
         `;
 
@@ -3862,7 +3940,7 @@
         let html = `
             <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
                 <h3>Service Records</h3>
-                <button class="btn btn-primary" id="addServiceBtn">+ New Service Record</button>
+                <button class="btn btn-primary" id="addServiceBtn">${iconSvg('plus')} New Service Record</button>
             </div>
             <div class="table-wrap">
                 <table>
@@ -3885,7 +3963,7 @@
                     <td>${formatCurrency(s.serviceCost || 0)}</td>
                     <td>
                         <button class="btn btn-outline btn-sm edit-service" data-id="${s.id}">Edit</button>
-                        <button class="btn btn-danger btn-sm delete-service" data-id="${s.id}">Del</button>
+                        <button class="btn btn-danger btn-sm delete-service" data-id="${s.id}">${iconSvg('trash')}</button>
                     </td>
                 </tr>`;
             });
@@ -3920,7 +3998,7 @@
         const modalHtml = `
             <div class="modal-overlay" id="serviceModalOverlay">
                 <div class="modal">
-                    <button class="modal-close" id="closeServiceModal">✕</button>
+                    <button class="modal-close" id="closeServiceModal">${iconSvg('close')}</button>
                     <h3>${isEdit ? 'Edit' : 'New'} Service Record</h3>
                     <form id="serviceForm">
                         <div class="form-grid">
@@ -3988,7 +4066,7 @@
         let html = `
             <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
                 <h3>Warranty Records</h3>
-                <button class="btn btn-primary" id="addWarrantyBtn">+ New Warranty</button>
+                <button class="btn btn-primary" id="addWarrantyBtn">${iconSvg('plus')} New Warranty</button>
             </div>
             <div class="table-wrap">
                 <table>
@@ -4011,7 +4089,7 @@
                     <td>${escapeHtml(w.coverageDetails || '')}</td>
                     <td>
                         <button class="btn btn-outline btn-sm edit-warranty" data-id="${w.id}">Edit</button>
-                        <button class="btn btn-danger btn-sm delete-warranty" data-id="${w.id}">Del</button>
+                        <button class="btn btn-danger btn-sm delete-warranty" data-id="${w.id}">${iconSvg('trash')}</button>
                     </td>
                 </tr>`;
             });
@@ -4046,7 +4124,7 @@
         const modalHtml = `
             <div class="modal-overlay" id="warrantyModalOverlay">
                 <div class="modal">
-                    <button class="modal-close" id="closeWarrantyModal">✕</button>
+                    <button class="modal-close" id="closeWarrantyModal">${iconSvg('close')}</button>
                     <h3>${isEdit ? 'Edit' : 'New'} Warranty</h3>
                     <form id="warrantyForm">
                         <div class="form-grid">
@@ -4107,6 +4185,7 @@
         registerServiceWorker(); // <-- NEW: Register service worker for offline support
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
+        injectIconStyles(); // <-- Add icon styles
         navigateTo('invoices');
         scheduleVersionCheck();
     }).catch(err => {
