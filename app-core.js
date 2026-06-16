@@ -984,7 +984,7 @@
             }
             saveProfile(backupData.profile);
             showToast('Backup restored successfully!', 'success');
-            navigateTo('dashboard');
+            navigateTo('invoices');
             return true;
         } catch (err) {
             showToast('Restore failed: ' + err.message, 'error');
@@ -1521,12 +1521,13 @@
         if (activeNav) activeNav.classList.add('active');
         renderPage(page);
         if (window.innerWidth <= 768) sidebar.classList.remove('open');
+        // Dispatch custom event for page color system
+        document.dispatchEvent(new CustomEvent('pageChange', { detail: { page } }));
     }
 
     async function renderPage(page) {
         try {
             switch (page) {
-                case 'dashboard': await renderDashboard(); break;
                 case 'invoices': await renderInvoices(); break;
                 case 'purchase-orders': await renderPurchaseOrders(); break;
                 case 'expenses': await renderExpenses(); break;
@@ -1537,7 +1538,7 @@
                 case 'profile': renderProfile(); break;
                 case 'settings': await renderSettings(); break;
                 case 'service-warranty': await renderServiceWarranty(); break;
-                default: await renderDashboard();
+                default: await renderInvoices(); // fallback to invoices
             }
         } catch (err) {
             console.error(err);
@@ -1571,73 +1572,7 @@
         }
     }
 
-    // ---------- Dashboard ----------
-    async function renderDashboard() {
-        try {
-            const invoices = await dbGetAll('invoices');
-            const expenses = await dbGetAll('expenses');
-            const purchaseOrders = await dbGetAll('purchaseOrders');
-            const totalSales = invoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0);
-            const pendingInvoices = invoices.filter(inv => inv.paymentStatus !== 'Paid').length;
-            const totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-            const totalCOGS = purchaseOrders.reduce((sum, po) => sum + (po.grandTotal || 0), 0);
-            const profit = totalSales - totalExpenses - totalCOGS;
-            mainContent.innerHTML = `
-                <div class="page-header"><h1 class="page-title">Dashboard</h1></div>
-                <div class="stat-row">
-                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalSales)}</div><div class="stat-label">Total Sales</div></div>
-                    <div class="stat-card"><div class="stat-value">${pendingInvoices}</div><div class="stat-label">Pending Invoices</div></div>
-                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalExpenses)}</div><div class="stat-label">Total Expenses</div></div>
-                    <div class="stat-card"><div class="stat-value">${formatCurrency(profit)}</div><div class="stat-label">Net Profit (Sales - Expenses - COGS)</div></div>
-                </div>
-                <div class="card"><h3>Quick Overview</h3><p>Use sidebar to manage invoices, POs, expenses, contacts, and run reports.</p></div>
-            `;
-        } catch (err) {
-            showToast('Failed to load dashboard', 'error');
-            mainContent.innerHTML = '<div class="card">Unable to load dashboard data.</div>';
-        }
-    }
-
-    // ---------- Constants ----------
-    const GST_SLABS = [0, 5, 12, 18, 28];
-    const PAYMENT_TERMS = ['Immediate', 'Net 15 Days', 'Net 30 Days', 'Net 45 Days', 'Net 60 Days', 'Net 90 Days'];
-    const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue', 'Partially Paid'];
-    const PRODUCT_TYPES = ['Product', 'Service', 'Spare']; // Added 'Spare'
-    const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
-    const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
-
-    function invoiceItemRow(item, idx, products) {
-        const selectedProductId = item ? item.productId : (products[0]?.id || '');
-        const productOptions = products.length ? products.map(p => `<option value="${p.id}" ${p.id == selectedProductId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.type || 'Product'})</option>`).join('') : '<option disabled>No products found</option>';
-        const rateValue = (item && item.rate) ? item.rate : '';
-        // FIX: selected GST rate should use the item's rate, with 0 as valid
-        const selectedGst = item && item.selectedGstRate !== undefined ? item.selectedGstRate : 18;
-        return `
-            <div class="invoice-item-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
-                <select class="item-product" style="flex:2; min-width:120px;">${productOptions}</select>
-                <input type="number" class="item-qty" placeholder="Qty" value="${item ? item.qty : 1}" step="1" style="width:70px;">
-                <input type="number" class="item-rate" placeholder="Rate" value="${rateValue}" step="0.01" style="width:90px;">
-                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}" ${s === selectedGst ? 'selected' : ''}>${s}%</option>`).join('')}</select>
-                <button type="button" class="btn btn-danger btn-xs remove-item-row">✕</button>
-            </div>
-        `;
-    }
-
-    function poItemRow(item, idx, products) {
-        const selectedProductId = item ? item.productId : (products[0]?.id || '');
-        const productOptions = products.length ? products.map(p => `<option value="${p.id}" ${p.id == selectedProductId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.type || 'Product'})</option>`).join('') : '<option disabled>No products found</option>';
-        const rateValue = (item && item.rate) ? item.rate : '';
-        const selectedGst = item && item.selectedGstRate !== undefined ? item.selectedGstRate : 18;
-        return `
-            <div class="po-item-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
-                <select class="item-product" style="flex:2; min-width:120px;">${productOptions}</select>
-                <input type="number" class="item-qty" value="${item ? item.qty : 1}" step="1" style="width:70px;">
-                <input type="number" class="item-rate" value="${rateValue}" step="0.01" style="width:90px;">
-                <select class="item-gst" style="width:80px;">${GST_SLABS.map(s => `<option value="${s}" ${s === selectedGst ? 'selected' : ''}>${s}%</option>`).join('')}</select>
-                <button type="button" class="btn btn-danger btn-xs remove-row">✕</button>
-            </div>
-        `;
-    }
+    // ---------- Dashboard has been removed ----------
 
     // ---------- Invoices ----------
     async function renderInvoices() {
@@ -2794,7 +2729,7 @@
             syncState.recoveryToastShown = false;
             saveSyncPersist();
             showToast('✅ All data has been reset successfully.', 'success');
-            navigateTo('dashboard');
+            navigateTo('invoices');
         } catch (err) {
             console.error('Reset error:', err);
             showToast('Error during reset: ' + err.message, 'error');
@@ -3420,7 +3355,7 @@
                     }
                     saveProfile(backupData.profile);
                     showToast('Backup restored successfully!', 'success');
-                    navigateTo('dashboard');
+                    navigateTo('invoices');
                 } finally {
                     _suppressAutoBackup = false;
                     scheduleAutoBackup();
@@ -4053,7 +3988,8 @@
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         // Initialize local file sync
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
-        navigateTo('dashboard');
+        // Default page: Invoices (Dashboard removed)
+        navigateTo('invoices');
         scheduleVersionCheck();
     }).catch(err => {
         console.error('IndexedDB error:', err);
