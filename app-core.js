@@ -4,6 +4,7 @@
 // sync status indicator, retry-on-401, smart auto-backup, service & warranty, product inventory
 // + Reset & Delete Data, Daily Backup Status, Auto-backup default 4h enabled, Inventory Type column,
 // GST 0% fix, View modal table header fix, File System Access API for local disk sync
+// + Service Worker registration for offline caching
 
 (function() {
     'use strict';
@@ -20,7 +21,7 @@
 
     const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
 
-    // ---------- Constants for dropdowns (FIX: missing definitions) ----------
+    // ---------- Constants for dropdowns ----------
     const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue'];
     const PAYMENT_TERMS = ['Immediate', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
     const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
@@ -30,6 +31,27 @@
     // Global flag to suppress auto-backup during restore
     let _suppressAutoBackup = false;
 
+    // ---------- Service Worker Registration ----------
+    function registerServiceWorker() {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js', { scope: '/' })
+                .then(reg => {
+                    console.log('Service Worker registered successfully.');
+                    reg.addEventListener('updatefound', () => {
+                        const installingWorker = reg.installing;
+                        installingWorker.addEventListener('statechange', () => {
+                            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('New service worker installed, refresh to activate.');
+                                showToast('🔄 App update available. Please refresh or reopen.', 'info');
+                            }
+                        });
+                    });
+                })
+                .catch(err => console.warn('Service Worker registration failed:', err));
+        }
+    }
+
+    // ---------- IndexedDB functions ----------
     function openDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -58,7 +80,7 @@
             request.onsuccess = () => {
                 resolve(request.result);
                 if (!_suppressAutoBackup) scheduleAutoBackup();
-                scheduleLocalFileWrite(); // trigger local file write on data change
+                scheduleLocalFileWrite();
             };
             request.onerror = () => reject(request.error);
         });
@@ -804,7 +826,7 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
-            const settings = await dbGetAll('settings'); // all settings (key-value pairs)
+            const settings = await dbGetAll('settings');
             const profile = getProfile();
             const backupData = {
                 version: 2,
@@ -818,7 +840,7 @@
                 expenses,
                 serviceHistory,
                 warranties,
-                settings  // include settings for restore
+                settings
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -1372,7 +1394,6 @@
         return { intra: isIntra, cgst: isIntra ? 9 : 0, sgst: isIntra ? 9 : 0, igst: isIntra ? 0 : 18 };
     }
 
-    // FIX: GST 0% bug - use nullish coalescing instead of OR to preserve 0 value
     function applyDiscountAndRecalcTaxes(itemsRaw, discount, stateOfSupply, partyState, products) {
         const itemsWithBase = itemsRaw.map(it => {
             const prod = products.find(p => p.id == it.productId) || {};
@@ -1382,7 +1403,6 @@
                 originalTaxable,
                 description: prod.name || 'Unknown Item',
                 hsn: prod.hsnSacCode || '',
-                // FIX: Use nullish coalescing to preserve 0% GST rate
                 selectedGstRate: it.selectedGstRate !== undefined && it.selectedGstRate !== null ? it.selectedGstRate : 18
             };
         });
@@ -1528,7 +1548,6 @@
         if (activeNav) activeNav.classList.add('active');
         renderPage(page);
         if (window.innerWidth <= 768) sidebar.classList.remove('open');
-        // Dispatch custom event for page color system
         document.dispatchEvent(new CustomEvent('pageChange', { detail: { page } }));
     }
 
@@ -1545,7 +1564,7 @@
                 case 'profile': renderProfile(); break;
                 case 'settings': await renderSettings(); break;
                 case 'service-warranty': await renderServiceWarranty(); break;
-                default: await renderInvoices(); // fallback to invoices
+                default: await renderInvoices();
             }
         } catch (err) {
             console.error(err);
@@ -1823,7 +1842,7 @@
         }
     }
 
-    // ---------- Helper row functions for invoice/PO item rows (FIX: missing definitions) ----------
+    // ---------- Helper row functions for invoice/PO item rows ----------
     function invoiceItemRow(item, idx, products) {
         const productOptions = products.map(p => `<option value="${p.id}" ${item && item.productId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
         const qty = item ? item.qty : 1;
@@ -1972,7 +1991,6 @@
             document.getElementById('invoiceForm').addEventListener('submit', async e => {
                 e.preventDefault();
                 try {
-                    // Validation: ensure customer selected and at least one item
                     const customerId = Number(customerSelect.value);
                     if (!customerId || isNaN(customerId) || customerId <= 0) {
                         showToast('Please select a valid customer.', 'error');
@@ -1983,7 +2001,6 @@
                         showToast('Please add at least one item.', 'error');
                         return;
                     }
-                    // Validate each item has qty > 0 and rate > 0
                     let valid = true;
                     itemRows.forEach(row => {
                         const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
@@ -2225,7 +2242,6 @@
                     if (product) {
                         const rateInput = row.querySelector('.item-rate');
                         const gstSelect = row.querySelector('.item-gst');
-                        // FIX: use purchasePrice instead of costPrice
                         rateInput.value = product.purchasePrice || 0;
                         const gstValue = product.gstRate || 18;
                         if ([...gstSelect.options].some(opt => opt.value == gstValue)) gstSelect.value = gstValue;
@@ -2263,7 +2279,6 @@
             document.getElementById('poForm').addEventListener('submit', async e => {
                 e.preventDefault();
                 try {
-                    // Validation: ensure supplier selected and at least one item
                     const supplierId = Number(supplierSelect.value);
                     if (!supplierId || isNaN(supplierId) || supplierId <= 0) {
                         showToast('Please select a valid supplier.', 'error');
@@ -2274,7 +2289,6 @@
                         showToast('Please add at least one item.', 'error');
                         return;
                     }
-                    // Validate each item
                     let valid = true;
                     itemRows.forEach(row => {
                         const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
@@ -2354,7 +2368,6 @@
     }
 
     async function showExpenseModal(expData = null) {
-        // If expData is a MouseEvent (or any event), treat as no data
         if (expData && typeof expData === 'object' && expData.target) {
             expData = null;
         }
@@ -2498,7 +2511,6 @@
     }
 
     // ---------- Products (Enhanced) ----------
-    // Renamed to "Inventory" in the UI. Type column added as first column.
     async function renderProducts() {
         try {
             const allProducts = await dbGetAll('products');
@@ -2511,7 +2523,6 @@
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
-                    <!-- Type column added as first column -->
                     <th>Type</th><th>SKU</th><th>Name</th><th>Brand</th><th>Model</th><th>Category</th><th>Capacity (KVA)</th><th>Sell Price</th><th>Stock</th><th>Status</th><th>Actions</th>
                 </tr></thead><tbody>`;
                 filteredProducts.forEach(p => {
@@ -2583,14 +2594,12 @@
             const modalHtml = `<div class="modal-overlay" id="prodModalOverlay"><div class="modal"><button class="modal-close" id="closeProdModal">✕</button><h3>${isEdit ? 'Edit' : 'Add'} Item</h3>
                 <form id="prodForm">
                     <div class="form-grid">
-                        <!-- Basic Info -->
                         <div class="form-group"><label>Type</label><select id="prodType">${PRODUCT_TYPES.map(t => `<option value="${t}" ${isEdit && prodData.type === t ? 'selected' : (t === 'Product' && !isEdit ? 'selected' : '')}>${t}</option>`).join('')}</select></div>
                         <div class="form-group"><label>SKU (Item ID)</label><input id="prodSku" value="${isEdit ? escapeHtml(prodData.sku || '') : ''}" placeholder="e.g. GEN-001"></div>
                         <div class="form-group"><label>Item Name *</label><input id="prodName" value="${isEdit ? escapeHtml(prodData.name) : ''}" required></div>
                         <div class="form-group"><label>Brand</label><input id="prodBrand" value="${isEdit ? escapeHtml(prodData.brand || '') : ''}"></div>
                         <div class="form-group"><label>Model Number</label><input id="prodModel" value="${isEdit ? escapeHtml(prodData.modelNumber || '') : ''}"></div>
                         <div class="form-group"><label>Category</label><input id="prodCategory" value="${isEdit ? escapeHtml(prodData.category || '') : ''}"></div>
-                        <!-- Generator Specs (keep for products) -->
                         <div class="form-group"><label>Fuel Type</label>
                             <select id="prodFuelType">
                                 <option value="">Select</option>
@@ -2615,11 +2624,9 @@
                         <div class="form-group"><label>Serial Number</label><input id="prodSerial" value="${isEdit ? escapeHtml(prodData.serialNumber || '') : ''}"></div>
                         <div class="form-group"><label>Manufacturing Year</label><input type="number" id="prodYear" value="${isEdit ? prodData.manufacturingYear || '' : ''}"></div>
                         <div class="form-group"><label>Warranty Period (months)</label><input type="number" id="prodWarranty" value="${isEdit ? prodData.warrantyPeriod || '' : ''}"></div>
-                        <!-- Pricing & GST -->
                         <div class="form-group"><label>Purchase Price (₹)</label><input type="number" step="0.01" id="prodCostPrice" value="${isEdit ? (prodData.purchasePrice || 0) : 0}"></div>
                         <div class="form-group"><label>Selling Price (₹)</label><input type="number" step="0.01" id="prodSellingPrice" value="${isEdit ? (prodData.sellingPrice || 0) : 0}"></div>
                         <div class="form-group"><label>GST %</label><input type="number" step="0.1" id="prodGst" value="${isEdit ? prodData.gstRate : 18}"></div>
-                        <!-- Supplier & Stock -->
                         <div class="form-group"><label>Supplier</label>
                             <select id="prodSupplier">
                                 <option value="">Select Supplier</option>
@@ -2676,7 +2683,6 @@
     }
 
     // ---------- Business Profile ----------
-    // Enhanced to include all business contact and banking details
     function renderProfile() {
         const p = getProfile();
         mainContent.innerHTML = `
@@ -2694,7 +2700,6 @@
                         <div class="form-group"><label>Email</label><input id="bizEmail" type="email" value="${escapeHtml(p.email)}"></div>
                         <div class="form-group"><label>Phone</label><input id="bizPhone" value="${escapeHtml(p.phone)}"></div>
                         <div class="form-group"><label>Invoice Prefix</label><input id="bizPrefix" value="${escapeHtml(p.invoicePrefix)}"></div>
-                        <!-- Banking Details -->
                         <div class="form-group"><label>Bank Name</label><input id="bizBankName" value="${escapeHtml(p.bankName)}"></div>
                         <div class="form-group"><label>Account Number</label><input id="bizAccountNo" value="${escapeHtml(p.accountNo)}"></div>
                         <div class="form-group"><label>IFSC Code</label><input id="bizIfsc" value="${escapeHtml(p.ifsc)}"></div>
@@ -2723,7 +2728,6 @@
             };
             saveProfile(updated);
             showToast('Profile updated successfully.', 'success');
-            // Refresh any open views if needed? Not necessary.
         });
     }
 
@@ -2743,23 +2747,18 @@
         try {
             showToast('Resetting all data...', 'info');
             _suppressAutoBackup = true;
-            // Clear all stores
             for (const storeName of stores) {
                 await dbClearStore(storeName);
             }
-            // Reset counters
             await dbSetSetting('nextInvoiceNumber', 1);
             await dbSetSetting('nextPONumber', 1);
             await dbSetSetting('nextServiceId', 1);
             await dbSetSetting('nextWarrantyId', 1);
-            // Reset profile to default
             saveProfile({ ...defaultProfile });
-            // Clear local storage sync data
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
             localStorage.removeItem('genfin_last_backup');
-            // Reset sync state
             syncState.lastSuccessAt = null;
             syncState.lastAttemptAt = null;
             syncState.lastError = null;
@@ -2777,36 +2776,20 @@
         }
     }
 
-    // ================================================================
     // ---------- FILE SYSTEM ACCESS API (Local Disk Sync) ----------
-    // ================================================================
-
     let localFileHandle = null;
     let localFileWriteDebounceTimer = null;
     let localFileWritePending = false;
     let localFileLastWriteTime = null;
 
-    // Check if File System Access API is supported
     function isFileSystemAccessSupported() {
         return 'showSaveFilePicker' in window && 'showDirectoryPicker' in window;
     }
 
-    // Load stored file handle from settings
     async function loadLocalFileHandle() {
         try {
             const handleData = await dbGetSetting('localFileHandle');
             if (handleData) {
-                // For security, we can't restore a handle directly from JSON; we need to request permission again.
-                // We'll store only the file name and last modified time to display, but we need to re-prompt user.
-                // Actually, we can store the handle as a serialized object but it's not portable.
-                // Better approach: store the file name and path (for display) and ask user to select again if needed.
-                // We'll implement a simpler approach: we store the file name and timestamp, and on app load we check if we have a valid handle.
-                // Since we can't persist a handle across sessions reliably (permission may be lost), we'll use a flag to indicate a file was selected.
-                // The user will need to re-select on each session, but we can ask for permission to keep the handle.
-                // Actually, we can store the handle as an object in IndexedDB using structured clone, but that's not safe.
-                // We'll store a "fileSelected" flag and the last write time; on app load we'll check if the file exists and prompt to reconnect if needed.
-                // For simplicity, we'll use a toast to ask user to re-select if we detect we need to write.
-                // We'll store the file name for display.
                 if (handleData.fileName) {
                     return { fileName: handleData.fileName, lastWrite: handleData.lastWrite };
                 }
@@ -2829,14 +2812,12 @@
         await updateLocalFileUI();
     }
 
-    // Request a file handle from user (save as dialog)
     async function requestLocalFileHandle() {
         if (!isFileSystemAccessSupported()) {
             showToast('File System Access API not supported in this browser.', 'error');
             return false;
         }
         try {
-            // Suggest a default filename
             const suggestedName = `genfin_local_data_${new Date().toISOString().slice(0,10)}.json`;
             const options = {
                 suggestedName,
@@ -2848,16 +2829,13 @@
                 ],
             };
             const handle = await window.showSaveFilePicker(options);
-            // Request write permission
             const permission = await handle.requestPermission({ mode: 'readwrite' });
             if (permission !== 'granted') {
                 showToast('Permission to write to file was denied.', 'error');
                 return false;
             }
             localFileHandle = handle;
-            // Write initial data
             await writeDataToLocalFile();
-            // Save info
             await saveLocalFileHandleInfo(handle.name);
             showToast(`Local file selected: ${handle.name}`, 'success');
             await updateLocalFileUI();
@@ -2871,16 +2849,13 @@
         }
     }
 
-    // Check if we have a valid handle and permission
     async function checkLocalFilePermission() {
         if (!localFileHandle) return false;
         try {
-            // Request permission
             const permission = await localFileHandle.requestPermission({ mode: 'readwrite' });
             if (permission === 'granted') {
                 return true;
             } else {
-                // Permission denied or not granted
                 return false;
             }
         } catch (err) {
@@ -2889,27 +2864,21 @@
         }
     }
 
-    // Write all data to the local file
     async function writeDataToLocalFile() {
         if (!localFileHandle) {
-            // No file selected, try to load from settings
             const info = await loadLocalFileHandle();
             if (info && info.fileName) {
-                // We have a file name, but we need to re-ask user to select it again (or we can try to get handle via window.showOpenFilePicker)
-                // For simplicity, we'll show a toast to reconnect
                 showLocalFileReconnectToast();
                 return false;
             }
             return false;
         }
-        // Check permission
         const hasPermission = await checkLocalFilePermission();
         if (!hasPermission) {
             showLocalFileReconnectToast();
             return false;
         }
         try {
-            // Gather all data
             const customers = await dbGetAll('customers');
             const suppliers = await dbGetAll('suppliers');
             const products = await dbGetAll('products');
@@ -2944,7 +2913,6 @@
             return true;
         } catch (err) {
             console.error('Error writing to local file:', err);
-            // If permission error, show reconnect toast
             if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
                 showLocalFileReconnectToast();
             } else {
@@ -2954,10 +2922,8 @@
         }
     }
 
-    // Debounced write to local file
     async function scheduleLocalFileWrite() {
         if (!localFileHandle && !(await localFileHandleInfoExists())) {
-            // No file selected, skip
             return;
         }
         if (localFileWriteDebounceTimer) {
@@ -2966,20 +2932,17 @@
         localFileWriteDebounceTimer = setTimeout(async () => {
             localFileWriteDebounceTimer = null;
             await writeDataToLocalFile();
-        }, 2000); // 2 second debounce to avoid frequent writes
+        }, 2000);
     }
 
-    // Check if we have stored info about a local file
     async function localFileHandleInfoExists() {
         const info = await loadLocalFileHandle();
         return info && info.fileName;
     }
 
-    // Show a toast to reconnect local file
     function showLocalFileReconnectToast() {
         const container = document.getElementById('toastContainer');
         if (!container) return;
-        // Remove existing reconnect toast to avoid duplicates
         const existing = container.querySelector('.toast-local-file-reconnect');
         if (existing) existing.remove();
 
@@ -3001,13 +2964,11 @@
             toast.remove();
         });
         container.appendChild(toast);
-        // Auto-remove after 30 seconds or when reconnected
         setTimeout(() => {
             if (toast.parentNode) toast.remove();
         }, 30000);
     }
 
-    // Initialize local file sync on app load
     async function initializeLocalFileSync() {
         if (!isFileSystemAccessSupported()) {
             console.log('File System Access API not supported, local file sync disabled.');
@@ -3015,17 +2976,11 @@
         }
         const info = await loadLocalFileHandle();
         if (info && info.fileName) {
-            // We have a file name, but we need to get a handle. We can't get a handle from name alone.
-            // We'll show a toast to reconnect, and also try to automatically reconnect by prompting user.
-            // For better UX, we can try to open the file using showOpenFilePicker with the same name? Not possible.
-            // So we'll just show a reconnect toast.
             showLocalFileReconnectToast();
-            // Also update UI to show the file name
             await updateLocalFileUI(info.fileName);
         }
     }
 
-    // Update UI elements for local file sync (in Settings)
     async function updateLocalFileUI(fileName) {
         const statusEl = document.getElementById('localFileStatus');
         const nameEl = document.getElementById('localFileName');
@@ -3057,7 +3012,6 @@
             if (localFileLastWriteTime) {
                 lastWriteEl.textContent = new Date(localFileLastWriteTime).toLocaleString();
             } else {
-                // try to load from settings
                 const info = await loadLocalFileHandle();
                 if (info && info.lastWrite) {
                     lastWriteEl.textContent = new Date(info.lastWrite).toLocaleString();
@@ -3074,7 +3028,6 @@
         }
     }
 
-    // Disconnect local file
     async function disconnectLocalFile() {
         if (confirm('Disconnect local file sync?')) {
             await clearLocalFileHandleInfo();
@@ -3083,9 +3036,7 @@
         }
     }
 
-    // ================================================================
-
-    // ---------- SETTINGS: Backup & Restore + Google Drive + Reset + Local Disk Sync ----------
+    // ---------- SETTINGS ----------
     async function renderSettings() {
         createSyncIndicator();
         updateGlobalSyncIndicator();
@@ -3125,7 +3076,6 @@
                             <button class="btn btn-danger" id="gdriveDisconnectBtn" style="display:none;">Disconnect</button>
                             <button class="btn btn-warning" id="gdriveReconnectBtn" style="display:none;">Reconnect</button>
                         </div>
-                        <!-- Daily Backup Status -->
                         <div style="margin-top: 10px; font-size:0.85rem; background:#f0fdf4; padding:8px 12px; border-radius:6px; border-left:3px solid #10b981;">
                             <strong>📅 Daily Backup Status:</strong> <span id="dailyBackupStatus">Not connected</span>
                         </div>
@@ -3164,7 +3114,6 @@
                 </div>
             </div>
 
-            <!-- New Card: Local Disk Sync (File System Access API) -->
             <div class="card">
                 <h3>💾 Local Disk Sync (Save to a JSON file on your computer)</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">
@@ -3187,7 +3136,6 @@
                 </div>
             </div>
 
-            <!-- Reset & Delete Data -->
             <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
                 <h3 style="color: #dc2626;">⚠️ Reset & Delete Data</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">Permanently erase all business data and reset the app to a fresh state. This action cannot be undone.</p>
@@ -3195,7 +3143,6 @@
             </div>
         `;
 
-        // --- Event listeners for local file sync ---
         const selectLocalBtn = document.getElementById('selectLocalFileBtn');
         const disconnectLocalBtn = document.getElementById('disconnectLocalFileBtn');
         if (selectLocalBtn) {
@@ -3208,7 +3155,6 @@
             disconnectLocalBtn.addEventListener('click', disconnectLocalFile);
         }
 
-        // --- Other settings listeners ---
         document.getElementById('exportBackupBtn').addEventListener('click', exportBackup);
         const importBtn = document.getElementById('importBackupBtn');
         const fileInput = document.getElementById('backupFileInput');
@@ -3273,7 +3219,6 @@
             resetBtn.addEventListener('click', resetAllData);
         }
 
-        // Update Drive UI and local file UI
         updateDriveUI(!!accessToken);
         updateLastBackupUI();
         updateSettingsUI();
@@ -3337,7 +3282,6 @@
         reader.onload = async (e) => {
             try {
                 const backupData = JSON.parse(e.target.result);
-                // Validate version
                 if (!backupData.version || backupData.version !== 2) {
                     throw new Error('Unsupported backup version. Expected version 2.');
                 }
@@ -3357,7 +3301,6 @@
                     for (const storeName of stores) {
                         await dbClearStore(storeName);
                     }
-                    // Restore settings first
                     if (backupData.settings && Array.isArray(backupData.settings)) {
                         for (const setting of backupData.settings) {
                             await dbSetSetting(setting.key, setting.value);
@@ -3492,7 +3435,6 @@
         await generate();
     }
 
-    // Monthly Trends Chart
     async function generateTrendsReport(year) {
         const allInvoices = await dbGetAll('invoices');
         const products = await dbGetAll('products');
@@ -4023,10 +3965,9 @@
     // ---- Start app ----
     openDB().then(() => {
         updateOnlineStatus();
+        registerServiceWorker(); // <-- NEW: Register service worker for offline support
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
-        // Initialize local file sync
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
-        // Default page: Invoices (Dashboard removed)
         navigateTo('invoices');
         scheduleVersionCheck();
     }).catch(err => {

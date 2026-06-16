@@ -689,17 +689,11 @@
             <div class="subtitle">Business Manager</div>
         </div>
 
-        <div class="nav-section">
-            <div class="nav-label">Main</div>
-            <div class="nav-item active" data-page="dashboard">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                Dashboard
-            </div>
-        </div>
+        <!-- ─── "Main" section removed – Dashboard is gone ─── -->
 
         <div class="nav-section">
             <div class="nav-label">Transactions</div>
-            <div class="nav-item" data-page="invoices">
+            <div class="nav-item active" data-page="invoices">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                 Invoices
             </div>
@@ -779,11 +773,6 @@
 
             // ── Color palette for each page ──────────────────────────────
             const PAGE_COLORS = {
-                'dashboard': {
-                    primary: '#4F46E5',
-                    dark: '#4338CA',
-                    light: 'rgba(79,70,229,0.22)'
-                },
                 'invoices': {
                     primary: '#10B981',
                     dark: '#059669',
@@ -854,11 +843,8 @@
                 const activeNav = document.querySelector(`.nav-item[data-page="${page}"]`);
                 if (activeNav) {
                     activeNav.classList.add('active');
-                    // vibrant background: use the primary color with slight transparency
                     activeNav.style.background = colors.light;
-                    // subtle glow via box-shadow
                     activeNav.style.boxShadow = `inset 0 0 0 1px ${colors.primary}40, 0 0 20px ${colors.primary}15`;
-                    // left accent bar color is white (handled by ::before in CSS)
                 }
 
                 // 2. Style all table headers inside the main content
@@ -887,13 +873,6 @@
                     const page = this.dataset.page;
                     if (!page) return;
 
-                    // Let app-core.js handle the page navigation first.
-                    // We'll apply colors after a short delay to let the DOM update.
-                    // The app-core.js triggers a custom event or we can use MutationObserver.
-                    // For robustness, we use a small delay + MutationObserver fallback.
-
-                    // If app-core.js uses its own click handler, we need to let it run first.
-                    // We'll defer our color application.
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             applyPageColors(page);
@@ -904,12 +883,10 @@
 
             // ── MutationObserver: re-apply colors when content changes ──
             const observer = new MutationObserver(() => {
-                const currentPage = mainContent.dataset.activePage || 'dashboard';
-                // Only re-apply if we have a valid page
+                const currentPage = mainContent.dataset.activePage || 'invoices';
                 if (currentPage && PAGE_COLORS[currentPage]) {
                     applyPageColors(currentPage);
                 } else {
-                    // fallback: try to detect from active nav
                     const active = document.querySelector('.nav-item.active');
                     if (active) {
                         const page = active.dataset.page;
@@ -926,9 +903,9 @@
                 attributes: false,
             });
 
-            // ── Also watch for table addition via a more specific observer ──
+            // ── Also watch for table addition ─────────────────────────────
             const tableObserver = new MutationObserver(() => {
-                const currentPage = mainContent.dataset.activePage || 'dashboard';
+                const currentPage = mainContent.dataset.activePage || 'invoices';
                 if (currentPage && PAGE_COLORS[currentPage]) {
                     const ths = mainContent.querySelectorAll('.table-wrap th, thead th');
                     if (ths.length > 0) {
@@ -958,25 +935,22 @@
                         return;
                     }
                 }
-                // fallback: dashboard
-                applyPageColors('dashboard');
+                // fallback: Invoices (Dashboard removed)
+                applyPageColors('invoices');
             }
 
-            // Wait for DOM and app-core.js to settle
             if (document.readyState === 'complete') {
                 initColors();
             } else {
                 window.addEventListener('load', () => {
-                    // extra delay for app-core.js to render
                     setTimeout(initColors, 150);
                 });
             }
 
-            // ── Also expose so app-core.js can call us ──────────────────
+            // ── Expose so app-core.js can call us ────────────────────────
             window.__applyPageColors = applyPageColors;
 
-            // ── Re-run when app-core.js signals a page change ───────────
-            // Listen for a custom event that app-core.js might dispatch
+            // ── Listen for pageChange events ─────────────────────────────
             document.addEventListener('pageChange', function(e) {
                 const page = e.detail && e.detail.page;
                 if (page && PAGE_COLORS[page]) {
@@ -991,7 +965,6 @@
                 menuToggle.addEventListener('click', function() {
                     sidebar.classList.toggle('open');
                 });
-                // close on outside click (mobile)
                 document.addEventListener('click', function(e) {
                     if (window.innerWidth <= 768) {
                         if (!sidebar.contains(e.target) && e.target !== menuToggle && !menuToggle.contains(e
@@ -1002,7 +975,32 @@
                 });
             }
 
-            console.log('🎨 Page Color System ready – each nav item has a unique vibrant color!');
+            // ── Ensure Invoices is loaded as the default page ────────────
+            // If app-core.js exposes a navigate() or similar, we call it.
+            // Otherwise we simulate a click on the Invoices nav item.
+            function ensureInvoicesDefault() {
+                const invoicesNav = document.querySelector('.nav-item[data-page="invoices"]');
+                if (invoicesNav) {
+                    // If app-core.js uses a custom event or global, try that first
+                    if (window.__navigateTo) {
+                        window.__navigateTo('invoices');
+                        return;
+                    }
+                    // If app-core.js listens for nav clicks, trigger one
+                    // but only if the page isn't already loaded
+                    const currentPage = mainContent.dataset.activePage;
+                    if (currentPage !== 'invoices') {
+                        invoicesNav.click();
+                    }
+                    // Ensure colors are applied
+                    applyPageColors('invoices');
+                }
+            }
+
+            // Run after app-core.js has had a chance to render
+            setTimeout(ensureInvoicesDefault, 200);
+
+            console.log('🎨 Page Color System ready – Invoices is the new default home (Dashboard removed)');
         })();
     </script>
 
