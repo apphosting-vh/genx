@@ -18,6 +18,9 @@
 
     const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
 
+    // Global flag to suppress auto-backup during restore
+    let _suppressAutoBackup = false;
+
     function openDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -45,7 +48,7 @@
             const request = store.add(item);
             request.onsuccess = () => {
                 resolve(request.result);
-                scheduleAutoBackup();
+                if (!_suppressAutoBackup) scheduleAutoBackup();
             };
             request.onerror = () => reject(request.error);
         });
@@ -58,7 +61,7 @@
             const request = store.put(item);
             request.onsuccess = () => {
                 resolve(request.result);
-                scheduleAutoBackup();
+                if (!_suppressAutoBackup) scheduleAutoBackup();
             };
             request.onerror = () => reject(request.error);
         });
@@ -91,7 +94,7 @@
             const request = store.delete(id);
             request.onsuccess = () => {
                 resolve();
-                scheduleAutoBackup();
+                if (!_suppressAutoBackup) scheduleAutoBackup();
             };
             request.onerror = () => reject(request.error);
         });
@@ -104,7 +107,7 @@
             const request = store.clear();
             request.onsuccess = () => {
                 resolve();
-                scheduleAutoBackup();
+                // Do NOT trigger auto-backup here (will be handled by bulk restore)
             };
             request.onerror = () => reject(request.error);
         });
@@ -141,6 +144,38 @@
         });
     }
 
+    // ---- Atomic increment helpers for invoice/PO numbers (stored in settings) ----
+    async function getNextInvoiceNumber() {
+        let num = await dbGetSetting('nextInvoiceNumber');
+        if (num === null || num === undefined) num = 1;
+        const profile = getProfile();
+        const prefix = profile.invoicePrefix || 'GEN/';
+        const padded = String(num).padStart(3, '0');
+        return prefix + padded;
+    }
+
+    async function incrementInvoiceNumber() {
+        let num = await dbGetSetting('nextInvoiceNumber');
+        if (num === null || num === undefined) num = 1;
+        else num++;
+        await dbSetSetting('nextInvoiceNumber', num);
+        return num;
+    }
+
+    async function getNextPONumber() {
+        let num = await dbGetSetting('nextPONumber');
+        if (num === null || num === undefined) num = 1;
+        return 'PO-' + String(num).padStart(3, '0');
+    }
+
+    async function incrementPONumber() {
+        let num = await dbGetSetting('nextPONumber');
+        if (num === null || num === undefined) num = 1;
+        else num++;
+        await dbSetSetting('nextPONumber', num);
+        return num;
+    }
+
     // ---------- App Version Check ----------
     async function checkForAppUpdate() {
         try {
@@ -168,6 +203,7 @@
         const container = document.getElementById('toastContainer');
         if (!container) return;
 
+        // Remove any existing update toast to avoid duplication
         const existing = container.querySelector('.toast-update');
         if (existing) existing.remove();
 
@@ -205,7 +241,8 @@
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
-            window.location.reload(true);
+            // Use location.reload() without force parameter (deprecated)
+            window.location.reload();
         } catch (err) {
             console.error('Update failed:', err);
             showToast('Update failed: ' + err.message, 'error');
@@ -745,6 +782,7 @@
         setSyncState('syncing');
         try {
             const folderId = await ensureBackupFolder();
+            // Gather all data including settings
             const customers = await dbGetAll('customers');
             const suppliers = await dbGetAll('suppliers');
             const products = await dbGetAll('products');
@@ -753,13 +791,21 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
+            const settings = await dbGetAll('settings'); // all settings (key-value pairs)
             const profile = getProfile();
             const backupData = {
                 version: 2,
                 timestamp: new Date().toISOString(),
-                profile, customers, suppliers, products,
-                invoices, purchaseOrders, expenses,
-                serviceHistory, warranties
+                profile,
+                customers,
+                suppliers,
+                products,
+                invoices,
+                purchaseOrders,
+                expenses,
+                serviceHistory,
+                warranties,
+                settings  // include settings for restore
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -804,16 +850,15 @@
                 uploadSuccess = true;
             } catch (err) {
                 if (err.status === 403 && method === 'PATCH') {
-                    console.warn('403 on PATCH, trying to create a new file...');
+                    console.warn('403 on PATCH, trying to delete and recreate with standard name...');
                     if (fileId) {
                         await deleteDriveFile(fileId);
                     }
+                    // Now create a new file with the standard name, not a unique name
                     const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
                     const newForm = new FormData();
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    const uniqueName = `genfin_backup_${timestamp}.json`;
                     const newMetadata = {
-                        name: uniqueName,
+                        name: GD_BACKUP_FILENAME,
                         parents: [folderId],
                     };
                     newForm.append('metadata', new Blob([JSON.stringify(newMetadata)], { type: 'application/json' }));
@@ -892,7 +937,11 @@
             gapi.client.drive.files.get({ fileId, alt: 'media' })
         );
         const backupData = response.result;
-        if (!backupData.version || !backupData.profile ||
+        // Validate version
+        if (!backupData.version || backupData.version !== 2) {
+            throw new Error('Unsupported backup version. Expected version 2.');
+        }
+        if (!backupData.profile ||
             !backupData.customers || !backupData.suppliers || !backupData.products ||
             !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
             throw new Error('Invalid backup file format');
@@ -901,25 +950,44 @@
         if (!confirm(confirmMsg)) return false;
 
         showToast('Restoring backup, please wait...', 'info');
-        for (const storeName of stores) {
-            await dbClearStore(storeName);
+        // Suppress auto-backup during restore
+        _suppressAutoBackup = true;
+        try {
+            // Clear all stores except settings? Actually we will restore settings from backup, so clear all.
+            for (const storeName of stores) {
+                await dbClearStore(storeName);
+            }
+            // Restore settings first (if present)
+            if (backupData.settings && Array.isArray(backupData.settings)) {
+                for (const setting of backupData.settings) {
+                    await dbSetSetting(setting.key, setting.value);
+                }
+            }
+            // Then restore data
+            for (const customer of backupData.customers) await dbAdd('customers', customer);
+            for (const supplier of backupData.suppliers) await dbAdd('suppliers', supplier);
+            for (const product of backupData.products) await dbAdd('products', product);
+            for (const invoice of backupData.invoices) await dbAdd('invoices', invoice);
+            for (const po of backupData.purchaseOrders) await dbAdd('purchaseOrders', po);
+            for (const expense of backupData.expenses) await dbAdd('expenses', expense);
+            if (backupData.serviceHistory) {
+                for (const s of backupData.serviceHistory) await dbAdd('serviceHistory', s);
+            }
+            if (backupData.warranties) {
+                for (const w of backupData.warranties) await dbAdd('warranties', w);
+            }
+            saveProfile(backupData.profile);
+            showToast('Backup restored successfully!', 'success');
+            navigateTo('dashboard');
+            return true;
+        } catch (err) {
+            showToast('Restore failed: ' + err.message, 'error');
+            return false;
+        } finally {
+            _suppressAutoBackup = false;
+            // After restore, re-sync state
+            scheduleAutoBackup();
         }
-        for (const customer of backupData.customers) await dbAdd('customers', customer);
-        for (const supplier of backupData.suppliers) await dbAdd('suppliers', supplier);
-        for (const product of backupData.products) await dbAdd('products', product);
-        for (const invoice of backupData.invoices) await dbAdd('invoices', invoice);
-        for (const po of backupData.purchaseOrders) await dbAdd('purchaseOrders', po);
-        for (const expense of backupData.expenses) await dbAdd('expenses', expense);
-        if (backupData.serviceHistory) {
-            for (const s of backupData.serviceHistory) await dbAdd('serviceHistory', s);
-        }
-        if (backupData.warranties) {
-            for (const w of backupData.warranties) await dbAdd('warranties', w);
-        }
-        saveProfile(backupData.profile);
-        showToast('Backup restored successfully!', 'success');
-        navigateTo('dashboard');
-        return true;
     }
 
     async function showRestoreDialog() {
@@ -1207,8 +1275,7 @@
         ifsc: 'SBIN0001234',
         upi: 'genfin@upi',
         invoicePrefix: 'GEN/24-25/',
-        nextInvoiceNumber: 1,
-        nextPONumber: 1
+        // nextInvoiceNumber and nextPONumber now stored in settings
     };
 
     function getProfile() {
@@ -1218,32 +1285,6 @@
 
     function saveProfile(profile) {
         localStorage.setItem('genfin_profile', JSON.stringify(profile));
-    }
-
-    function getNextInvoiceNumber() {
-        const profile = getProfile();
-        const num = profile.nextInvoiceNumber || 1;
-        const padded = String(num).padStart(3, '0');
-        return profile.invoicePrefix + padded;
-    }
-
-    function incrementInvoiceNumber() {
-        const profile = getProfile();
-        profile.nextInvoiceNumber = (profile.nextInvoiceNumber || 1) + 1;
-        saveProfile(profile);
-    }
-
-    function getNextPONumber() {
-        const profile = getProfile();
-        const num = profile.nextPONumber || 1;
-        const padded = String(num).padStart(3, '0');
-        return 'PO-' + padded;
-    }
-
-    function incrementPONumber() {
-        const profile = getProfile();
-        profile.nextPONumber = (profile.nextPONumber || 1) + 1;
-        saveProfile(profile);
     }
 
     // ---- Service and Warranty ID generators ----
@@ -1490,17 +1531,19 @@
         try {
             const invoices = await dbGetAll('invoices');
             const expenses = await dbGetAll('expenses');
+            const purchaseOrders = await dbGetAll('purchaseOrders');
             const totalSales = invoices.reduce((sum, inv) => sum + (inv.grandTotal || 0), 0);
             const pendingInvoices = invoices.filter(inv => inv.paymentStatus !== 'Paid').length;
             const totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-            const profit = totalSales - totalExpenses;
+            const totalCOGS = purchaseOrders.reduce((sum, po) => sum + (po.grandTotal || 0), 0);
+            const profit = totalSales - totalExpenses - totalCOGS;
             mainContent.innerHTML = `
                 <div class="page-header"><h1 class="page-title">Dashboard</h1></div>
                 <div class="stat-row">
                     <div class="stat-card"><div class="stat-value">${formatCurrency(totalSales)}</div><div class="stat-label">Total Sales</div></div>
                     <div class="stat-card"><div class="stat-value">${pendingInvoices}</div><div class="stat-label">Pending Invoices</div></div>
                     <div class="stat-card"><div class="stat-value">${formatCurrency(totalExpenses)}</div><div class="stat-label">Total Expenses</div></div>
-                    <div class="stat-card"><div class="stat-value">${formatCurrency(profit)}</div><div class="stat-label">Net Profit</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(profit)}</div><div class="stat-label">Net Profit (Sales - Expenses - COGS)</div></div>
                 </div>
                 <div class="card"><h3>Quick Overview</h3><p>Use sidebar to manage invoices, POs, expenses, contacts, and run reports.</p></div>
             `;
@@ -1796,7 +1839,7 @@
                         <h3>${title}</h3>
                         <form id="invoiceForm">
                             <div class="form-grid">
-                                <div class="form-group"><label>Invoice Number</label><input type="text" id="invNumber" value="${isEdit ? invoiceData.invoiceNumber : getNextInvoiceNumber()}" ${isEdit ? '' : 'readonly'}></div>
+                                <div class="form-group"><label>Invoice Number</label><input type="text" id="invNumber" value="${isEdit ? invoiceData.invoiceNumber : await getNextInvoiceNumber()}" ${isEdit ? '' : 'readonly'}></div>
                                 <div class="form-group"><label>Date</label><input type="date" id="invDate" value="${defDate}"></div>
                                 <div class="form-group"><label>Customer</label><select id="invCustomer">${customers.map(c => `<option value="${c.id}" ${isEdit && invoiceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></div>
                                 <div class="form-group"><label>Payment Terms</label><select id="invPaymentTerms">${PAYMENT_TERMS.map(term => `<option value="${term}" ${term === defTerms ? 'selected' : ''}>${term}</option>`).join('')}</select></div>
@@ -1942,7 +1985,7 @@
                         stateOfSupply, isIntraState: getGstRates(stateOfSupply, profile.state).intra
                     };
                     if (isEdit) { invoiceObj.id = invoiceData.id; await dbPut('invoices', invoiceObj); }
-                    else { await dbAdd('invoices', invoiceObj); incrementInvoiceNumber(); }
+                    else { await dbAdd('invoices', invoiceObj); await incrementInvoiceNumber(); }
                     showToast('Invoice saved', 'success');
                     closeModal();
                     await renderInvoices();
@@ -2107,7 +2150,7 @@
             const defStatus = isEdit ? poData.status : 'Pending';
             const defDiscount = isEdit && poData.discount !== undefined ? poData.discount : 0;
             const modalHtml = `<div class="modal-overlay" id="poModalOverlay"><div class="modal"><button class="modal-close" id="closePOModal">✕</button><h3>${isEdit ? 'Edit' : 'New'} Purchase Order</h3>
-                <form id="poForm"><div class="form-grid"><div class="form-group"><label>PO Number</label><input type="text" id="poNumber" value="${isEdit ? poData.poNumber : getNextPONumber()}" ${isEdit ? '' : 'readonly'}></div>
+                <form id="poForm"><div class="form-grid"><div class="form-group"><label>PO Number</label><input type="text" id="poNumber" value="${isEdit ? poData.poNumber : await getNextPONumber()}" ${isEdit ? '' : 'readonly'}></div>
                 <div class="form-group"><label>Date</label><input type="date" id="poDate" value="${isEdit ? poData.date : new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Supplier</label><select id="poSupplier">${suppliers.map(s => `<option value="${s.id}" ${isEdit && poData.supplierId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
                 <div class="form-group"><label>Status</label><select id="poStatus">${PO_STATUSES.map(s => `<option value="${s}" ${s === defStatus ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
@@ -2207,7 +2250,7 @@
                     const discount = parseFloat(document.getElementById('poDiscount').value) || 0;
                     const { items, subtotal, totalTax, grandTotal } = applyDiscountAndRecalcTaxes(itemsRaw, discount, stateOfSupply, profile.state, products);
                     const poObj = { poNumber: document.getElementById('poNumber').value, date: document.getElementById('poDate').value, supplierId, items, subtotal, discount, totalTax, grandTotal, status: document.getElementById('poStatus').value };
-                    if (isEdit) { poObj.id = poData.id; await dbPut('purchaseOrders', poObj); } else { await dbAdd('purchaseOrders', poObj); incrementPONumber(); }
+                    if (isEdit) { poObj.id = poData.id; await dbPut('purchaseOrders', poObj); } else { await dbAdd('purchaseOrders', poObj); await incrementPONumber(); }
                     showToast('Purchase order saved', 'success');
                     close();
                     await renderPurchaseOrders();
@@ -2249,7 +2292,7 @@
                 if (!filteredExpenses.length) html += `<tr><td colspan="5" class="empty-state">No expenses in date range.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
-                document.getElementById('addExpenseBtn')?.addEventListener('click', showExpenseModal);
+                document.getElementById('addExpenseBtn')?.addEventListener('click', () => showExpenseModal());
                 document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); }));
             };
             const apply = () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); };
@@ -2261,6 +2304,10 @@
     }
 
     async function showExpenseModal(expData = null) {
+        // If expData is a MouseEvent (or any event), treat as no data
+        if (expData && typeof expData === 'object' && expData.target) {
+            expData = null;
+        }
         try {
             const isEdit = !!expData;
             const modalHtml = `<div class="modal-overlay" id="expModalOverlay"><div class="modal"><button class="modal-close" id="closeExpModal">✕</button><h3>${isEdit ? 'Edit' : 'Log'} Expense</h3>
@@ -2586,8 +2633,7 @@
                     <div class="form-group"><label>GSTIN</label><input id="bizGstin" value="${escapeHtml(p.gstin)}"></div>
                     <div class="form-group"><label>State</label><input id="bizState" value="${escapeHtml(p.state)}"></div>
                     <div class="form-group"><label>Invoice Prefix</label><input id="bizPrefix" value="${escapeHtml(p.invoicePrefix)}"></div>
-                    <div class="form-group"><label>Next Invoice #</label><input type="number" id="bizNextInv" value="${p.nextInvoiceNumber}"></div>
-                    <div class="form-group"><label>Next PO #</label><input type="number" id="bizNextPO" value="${p.nextPONumber}"></div>
+                    <!-- Invoice and PO numbers are now stored in settings, removed from profile -->
                 </div>
                 <button type="submit" class="btn btn-primary" style="margin-top:12px;">Update Profile</button>
             </form></div>
@@ -2599,8 +2645,6 @@
             updated.gstin = document.getElementById('bizGstin').value;
             updated.state = document.getElementById('bizState').value;
             updated.invoicePrefix = document.getElementById('bizPrefix').value;
-            updated.nextInvoiceNumber = parseInt(document.getElementById('bizNextInv').value) || 1;
-            updated.nextPONumber = parseInt(document.getElementById('bizNextPO').value) || 1;
             saveProfile(updated);
             showToast('Profile updated', 'success');
         });
@@ -2760,6 +2804,7 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
+            const settings = await dbGetAll('settings');
             const profile = getProfile();
             const backupData = {
                 version: 2,
@@ -2772,7 +2817,8 @@
                 purchaseOrders: purchaseOrders,
                 expenses: expenses,
                 serviceHistory: serviceHistory,
-                warranties: warranties
+                warranties: warranties,
+                settings: settings
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -2796,7 +2842,11 @@
         reader.onload = async (e) => {
             try {
                 const backupData = JSON.parse(e.target.result);
-                if (!backupData.version || !backupData.profile || 
+                // Validate version
+                if (!backupData.version || backupData.version !== 2) {
+                    throw new Error('Unsupported backup version. Expected version 2.');
+                }
+                if (!backupData.profile ||
                     !backupData.customers || !backupData.suppliers || !backupData.products ||
                     !backupData.invoices || !backupData.purchaseOrders || !backupData.expenses) {
                     throw new Error('Invalid backup file format');
@@ -2807,40 +2857,52 @@
                     return;
                 }
                 showToast('Restoring backup, please wait...', 'info');
-                for (const storeName of stores) {
-                    await dbClearStore(storeName);
-                }
-                for (const customer of backupData.customers) {
-                    await dbAdd('customers', customer);
-                }
-                for (const supplier of backupData.suppliers) {
-                    await dbAdd('suppliers', supplier);
-                }
-                for (const product of backupData.products) {
-                    await dbAdd('products', product);
-                }
-                for (const invoice of backupData.invoices) {
-                    await dbAdd('invoices', invoice);
-                }
-                for (const po of backupData.purchaseOrders) {
-                    await dbAdd('purchaseOrders', po);
-                }
-                for (const expense of backupData.expenses) {
-                    await dbAdd('expenses', expense);
-                }
-                if (backupData.serviceHistory) {
-                    for (const s of backupData.serviceHistory) {
-                        await dbAdd('serviceHistory', s);
+                _suppressAutoBackup = true;
+                try {
+                    for (const storeName of stores) {
+                        await dbClearStore(storeName);
                     }
-                }
-                if (backupData.warranties) {
-                    for (const w of backupData.warranties) {
-                        await dbAdd('warranties', w);
+                    // Restore settings first
+                    if (backupData.settings && Array.isArray(backupData.settings)) {
+                        for (const setting of backupData.settings) {
+                            await dbSetSetting(setting.key, setting.value);
+                        }
                     }
+                    for (const customer of backupData.customers) {
+                        await dbAdd('customers', customer);
+                    }
+                    for (const supplier of backupData.suppliers) {
+                        await dbAdd('suppliers', supplier);
+                    }
+                    for (const product of backupData.products) {
+                        await dbAdd('products', product);
+                    }
+                    for (const invoice of backupData.invoices) {
+                        await dbAdd('invoices', invoice);
+                    }
+                    for (const po of backupData.purchaseOrders) {
+                        await dbAdd('purchaseOrders', po);
+                    }
+                    for (const expense of backupData.expenses) {
+                        await dbAdd('expenses', expense);
+                    }
+                    if (backupData.serviceHistory) {
+                        for (const s of backupData.serviceHistory) {
+                            await dbAdd('serviceHistory', s);
+                        }
+                    }
+                    if (backupData.warranties) {
+                        for (const w of backupData.warranties) {
+                            await dbAdd('warranties', w);
+                        }
+                    }
+                    saveProfile(backupData.profile);
+                    showToast('Backup restored successfully!', 'success');
+                    navigateTo('dashboard');
+                } finally {
+                    _suppressAutoBackup = false;
+                    scheduleAutoBackup();
                 }
-                saveProfile(backupData.profile);
-                showToast('Backup restored successfully!', 'success');
-                navigateTo('dashboard');
             } catch (err) {
                 console.error(err);
                 showToast('Error importing backup: ' + err.message, 'error');
@@ -2988,7 +3050,6 @@
         document.getElementById('reportOutput').innerHTML = outputHtml;
         const ctx = document.getElementById('trendsChart').getContext('2d');
         if (currentTrendChart) currentTrendChart.destroy();
-        // Even with all zeros, chart can render, but if all data is zero, it's fine.
         currentTrendChart = new Chart(ctx, {
             type: 'line',
             data: {
