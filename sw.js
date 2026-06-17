@@ -1,8 +1,8 @@
 // sw.js - GenFin Production Offline Service Worker
-const CACHE_VERSION = 'v3.1';
+const CACHE_VERSION = 'v3.2';
 const CACHE_NAME = `genfin-${CACHE_VERSION}`;
 
-// Assets to cache on install (always from the same origin)
+// Same-origin assets to cache on install
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -10,31 +10,47 @@ const STATIC_ASSETS = [
     './manifest.json'
 ];
 
-// External CDN assets (cached with crossOrigin)
+// External CDN assets – cached individually with cross-origin mode
 const EXTERNAL_ASSETS = [
-    'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
+    { url: 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', crossOrigin: true },
+    { url: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js', crossOrigin: true }
 ];
 
 // URLs that should never be cached (always network)
 const NEVER_CACHE = [
     './app-version.json',
-    // Google auth scripts – dynamic and must come from network
     'https://accounts.google.com/gsi/client',
     'https://apis.google.com/js/api.js'
 ];
 
-// Install event – cache core assets
+// Install event – cache core assets, then external assets individually
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                // Cache static and external assets
-                return Promise.all([
-                    cache.addAll(STATIC_ASSETS),
-                    cache.addAll(EXTERNAL_ASSETS)
-                ]);
+                return cache.addAll(STATIC_ASSETS)
+                    .then(() => {
+                        // Cache external assets individually with no-cors to handle opaque responses
+                        return Promise.allSettled(
+                            EXTERNAL_ASSETS.map(asset => {
+                                const req = new Request(asset.url, {
+                                    mode: asset.crossOrigin ? 'no-cors' : 'same-origin'
+                                });
+                                return fetch(req)
+                                    .then(response => {
+                                        // no-cors gives opaque (status 0) – still cacheable
+                                        if (response && (response.status === 200 || response.type === 'opaque')) {
+                                            return cache.put(req, response);
+                                        }
+                                    })
+                                    .catch(err => {
+                                        console.warn('Failed to cache external asset:', asset.url, err);
+                                    });
+                            })
+                        );
+                    });
             })
-            .then(() => self.skipWaiting()) // Activate immediately
+            .then(() => self.skipWaiting())
     );
 });
 
@@ -51,11 +67,11 @@ self.addEventListener('activate', event => {
                 })
             );
         })
-        .then(() => self.clients.claim()) // Take control of all clients
+        .then(() => self.clients.claim())
     );
 });
 
-// Fetch – network‑first for NEVER_CACHE, stale‑while‑revalidate for others
+// Fetch handler
 self.addEventListener('fetch', event => {
     const request = event.request;
     const url = new URL(request.url);
@@ -66,38 +82,35 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 2) For navigation (HTML pages) – serve from cache, fallback to network, then to offline fallback
+    // 2) For navigation (HTML pages) – network-first, fall back to cache
     if (request.mode === 'navigate') {
         event.respondWith(
-            caches.match(request)
-                .then(cached => {
-                    if (cached) return cached;
-                    // Not in cache – try network
-                    return fetch(request)
-                        .then(response => {
-                            // Cache the new response for future
-                            const clone = response.clone();
-                            caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
-                            return response;
-                        })
-                        .catch(() => {
-                            // Offline – serve a simple fallback
-                            return caches.match('./index.html') || new Response(
-                                '<html><body><h1>Offline</h1><p>Please connect to the internet.</p></body></html>',
-                                { headers: { 'Content-Type': 'text/html' } }
-                            );
-                        });
+            fetch(request)
+                .then(response => {
+                    // Cache the fresh response for offline use
+                    if (response && response.status === 200) {
+                        const clone = response.clone();
+                        caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
+                    }
+                    return response;
+                })
+                .catch(() => {
+                    // Offline – serve from cache
+                    return caches.match(request)
+                        .then(cached => cached || caches.match('./index.html'))
+                        .then(fallback => fallback || new Response(
+                            '<html><body><h1>Offline</h1><p>Please connect to the internet.</p></body></html>',
+                            { headers: { 'Content-Type': 'text/html' } }
+                        ));
                 })
         );
         return;
     }
 
-    // 3) For static assets (JS, CSS, images, etc.) – use stale‑while‑revalidate
-    //    (serve from cache, update in background)
+    // 3) For static assets (JS, CSS, etc.) – stale-while-revalidate
     event.respondWith(
         caches.match(request)
             .then(cached => {
-                // Update the cache in the background (don't await)
                 const fetchPromise = fetch(request)
                     .then(response => {
                         if (response && response.status === 200) {
@@ -106,15 +119,13 @@ self.addEventListener('fetch', event => {
                         }
                         return response;
                     })
-                    .catch(() => {}); // ignore errors
+                    .catch(() => cached); // fallback to cache on network error
 
-                // Return cached version immediately, or wait for network if not cached
                 if (cached) {
-                    // Update cache in background
+                    // Return cached immediately, update in background
                     fetchPromise;
                     return cached;
                 } else {
-                    // Not cached – wait for network
                     return fetchPromise;
                 }
             })

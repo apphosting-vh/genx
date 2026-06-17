@@ -10,6 +10,9 @@
     <!-- Manifest for PWA -->
     <link rel="manifest" href="./manifest.json" />
 
+    <!-- SheetJS for Excel import/export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+
     <!-- Chart.js with crossOrigin for caching -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 
@@ -549,6 +552,9 @@
         .toast-info {
             background: var(--primary);
         }
+        .toast-warning {
+            background: #d97706;
+        }
         @keyframes slideIn {
             from {
                 transform: translateX(110%) scale(0.92);
@@ -982,8 +988,8 @@
             function ensureInvoicesDefault() {
                 const invoicesNav = document.querySelector('.nav-item[data-page="invoices"]');
                 if (invoicesNav) {
-                    if (window.__navigateTo) {
-                        window.__navigateTo('invoices');
+                    if (window.navigateTo) {
+                        window.navigateTo('invoices');
                         return;
                     }
                     const currentPage = mainContent.dataset.activePage;

@@ -67,6 +67,7 @@
         `;
         document.head.appendChild(style);
     }
+    injectIconStyles(); // Inject icon styles immediately before any rendering
 
     // ---------- App Version ----------
     const APP_VERSION = '1.0.0'; // Update this on each release
@@ -94,37 +95,65 @@
     function registerServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
 
-        // Dynamically compute the base path (for GitHub Pages subdirectory)
         const basePath = window.location.pathname.replace(/\/[^/]*$/, '/') || '/';
 
         navigator.serviceWorker.register('./sw.js', { scope: basePath })
             .then(reg => {
                 console.log('Service Worker registered with scope:', reg.scope);
+
+                // On page load, if there's a waiting worker, show update prompt
+                if (reg.waiting) {
+                    showUpdatePrompt(reg.waiting);
+                }
+
                 reg.addEventListener('updatefound', () => {
                     const newWorker = reg.installing;
+                    if (!newWorker) return;
                     newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            // New SW is waiting – notify user
-                            showToast('🔄 A new version is available. Please refresh.', 'info');
-                            // Optionally auto-skipWaiting by sending a message
-                            newWorker.postMessage('skipWaiting');
+                        if (newWorker.state === 'installed') {
+                            if (navigator.serviceWorker.controller) {
+                                // New version installed, show update prompt
+                                showUpdatePrompt(newWorker);
+                            }
+                            // else: first install, no prompt needed
                         }
                     });
                 });
             })
             .catch(err => console.warn('Service Worker registration failed:', err));
+    }
 
-        // Listen for controller changes (when a new SW takes over)
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-            console.log('Service Worker controller changed, reloading for fresh assets.');
-            // Reload only once to pick up new assets
-            if (localStorage.getItem('sw_reloaded') !== 'true') {
-                localStorage.setItem('sw_reloaded', 'true');
-                window.location.reload();
-            } else {
-                localStorage.removeItem('sw_reloaded');
-            }
+    // Show a one-time update prompt; user clicks to activate new SW
+    function showUpdatePrompt(worker) {
+        // Don't show if already dismissed this session
+        if (sessionStorage.getItem('update_prompt_dismissed')) return;
+
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        // Remove any existing update toast
+        const existing = container.querySelector('.toast-update');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'toast toast-info toast-update';
+        toast.style.cursor = 'pointer';
+        toast.innerHTML = `
+            <span>${iconSvg('refresh')} App update available!</span>
+            <button class="btn btn-sm" style="margin-left:10px; padding:2px 12px; background:#fff; color:#4f46e5; border:none; font-weight:700; cursor:pointer;">Update Now</button>
+            <button class="btn btn-sm toast-dismiss" style="margin-left:6px; padding:2px 8px; background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.4); cursor:pointer;">✕</button>
+        `;
+        toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', (e) => {
+            e.stopPropagation();
+            worker.postMessage('skipWaiting');
         });
+        toast.querySelector('.toast-dismiss').addEventListener('click', (e) => {
+            e.stopPropagation();
+            sessionStorage.setItem('update_prompt_dismissed', '1');
+            toast.remove();
+        });
+
+        container.appendChild(toast);
     }
 
     // ---------- IndexedDB functions ----------
@@ -293,26 +322,48 @@
             const url = `./app-version.json?t=${Date.now()}`;
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
-                console.warn('Version check failed:', response.status);
+                // File doesn't exist (e.g. 404) – not an error, just no version file deployed
+                if (response.status === 404) {
+                    console.log('No app-version.json found – skipping version check.');
+                } else {
+                    console.warn('Version check failed:', response.status);
+                }
                 return;
             }
             const data = await response.json();
             const remoteVersion = data.version;
             if (!remoteVersion) return;
 
-            if (remoteVersion !== APP_VERSION) {
+            if (isNewerVersion(remoteVersion, APP_VERSION)) {
                 showUpdateToast(remoteVersion);
             } else {
                 console.log('App is up to date (v' + APP_VERSION + ')');
             }
         } catch (err) {
-            console.warn('Version check error:', err);
+            // Network error or JSON parse error – silently ignore
+            console.debug('Version check skipped:', err.message);
         }
+    }
+
+    // Semantic version comparison: returns true if a > b
+    function isNewerVersion(a, b) {
+        const pa = a.split('.').map(Number);
+        const pb = b.split('.').map(Number);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+            const na = pa[i] || 0;
+            const nb = pb[i] || 0;
+            if (na > nb) return true;
+            if (na < nb) return false;
+        }
+        return false;
     }
 
     function showUpdateToast(newVersion) {
         const container = document.getElementById('toastContainer');
         if (!container) return;
+
+        // Don't show if already dismissed this session
+        if (sessionStorage.getItem('version_toast_dismissed')) return;
 
         // Remove any existing update toast to avoid duplication
         const existing = container.querySelector('.toast-update');
@@ -322,13 +373,18 @@
         toast.className = 'toast toast-info toast-update';
         toast.style.cursor = 'pointer';
         toast.innerHTML = `
-            <span>${iconSvg('refresh')} New version ${newVersion} available! </span>
-            <button class="btn btn-sm btn-primary" style="margin-left:10px; padding:2px 12px;">Update Now</button>
+            <span>${iconSvg('refresh')} New version ${newVersion} available!</span>
+            <button class="btn btn-sm" style="margin-left:10px; padding:2px 12px; background:#fff; color:#4f46e5; border:none; font-weight:700; cursor:pointer;">Update Now</button>
+            <button class="btn btn-sm toast-dismiss" style="margin-left:6px; padding:2px 8px; background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.4); cursor:pointer;">✕</button>
         `;
-        const updateBtn = toast.querySelector('button');
-        updateBtn.addEventListener('click', async (e) => {
+        toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', async (e) => {
             e.stopPropagation();
             await performAppUpdate();
+        });
+        toast.querySelector('.toast-dismiss').addEventListener('click', (e) => {
+            e.stopPropagation();
+            sessionStorage.setItem('version_toast_dismissed', '1');
+            toast.remove();
         });
         toast.addEventListener('click', async () => {
             await performAppUpdate();
@@ -337,7 +393,7 @@
         container.appendChild(toast);
         setTimeout(() => {
             if (toast.parentNode) toast.remove();
-        }, 30000);
+        }, 60000);
     }
 
     async function performAppUpdate() {
@@ -1612,10 +1668,12 @@
 
     function escapeHtml(str) {
         if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
+        return str.replace(/[&<>"']/g, function(m) {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
+            if (m === '"') return '&quot;';
+            if (m === "'") return '&#39;';
             return m;
         }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
             return c;
@@ -1650,6 +1708,7 @@
         if (window.innerWidth <= 768) sidebar.classList.remove('open');
         document.dispatchEvent(new CustomEvent('pageChange', { detail: { page } }));
     }
+    window.navigateTo = navigateTo;
 
     async function renderPage(page) {
         try {
@@ -1761,29 +1820,23 @@
                 document.querySelectorAll('.delete-invoice').forEach(btn => btn.addEventListener('click', async () => {
                     if (confirm('Delete this invoice?')) { await dbDelete('invoices', Number(btn.dataset.id)); await renderInvoices(); }
                 }));
-            };
-            
-            const applyFilter = () => {
-                fromDate = document.getElementById('invFromDate').value;
-                toDate = document.getElementById('invToDate').value;
-                filteredInvoices = filterByDateRange(allInvoices, fromDate, toDate);
-                renderTable();
-            };
-            const clearFilter = () => {
-                fromDate = '';
-                toDate = '';
-                filteredInvoices = [...allInvoices];
-                renderTable();
+                // Re-attach filter listeners every time table re-renders
+                document.getElementById('applyInvFilter')?.addEventListener('click', () => {
+                    fromDate = document.getElementById('invFromDate').value;
+                    toDate = document.getElementById('invToDate').value;
+                    filteredInvoices = filterByDateRange(allInvoices, fromDate, toDate);
+                    renderTable();
+                });
+                document.getElementById('clearInvFilter')?.addEventListener('click', () => {
+                    fromDate = '';
+                    toDate = '';
+                    filteredInvoices = [...allInvoices];
+                    renderTable();
+                });
             };
             
             filteredInvoices = [...allInvoices];
             renderTable();
-            setTimeout(() => {
-                const applyBtn = document.getElementById('applyInvFilter');
-                const clearBtn = document.getElementById('clearInvFilter');
-                if (applyBtn) applyBtn.addEventListener('click', applyFilter);
-                if (clearBtn) clearBtn.addEventListener('click', clearFilter);
-            }, 0);
         } catch (err) {
             showToast('Failed to load invoices', 'error');
             console.error(err);
@@ -2189,14 +2242,14 @@
                 document.querySelectorAll('.view-po').forEach(btn => btn.addEventListener('click', () => showPOViewModal(Number(btn.dataset.id))));
                 document.querySelectorAll('.edit-po').forEach(btn => btn.addEventListener('click', async () => { const po = await dbGetById('purchaseOrders', Number(btn.dataset.id)); if (po) showPOModal(po); }));
                 document.querySelectorAll('.export-po').forEach(btn => btn.addEventListener('click', () => exportPOPDF(Number(btn.dataset.id))));
-                document.querySelectorAll('.mark-received-btn, .mark-cancelled-btn, .mark-pending-btn').forEach(btn => btn.addEventListener('click', async () => { await updatePOStatus(Number(btn.dataset.id), btn.dataset.status); await renderPurchaseOrders(); }));
+                document.querySelectorAll('.mark-received-btn, .mark-cancelled-btn, .mark-pending-btn').forEach(btn => btn.addEventListener('click', async () => { await updatePOStatus(Number(btn.dataset.id), btn.dataset.status); }));
                 document.querySelectorAll('.delete-po').forEach(btn => btn.addEventListener('click', async () => { if (confirm('Delete this PO?')) { await dbDelete('purchaseOrders', Number(btn.dataset.id)); await renderPurchaseOrders(); } }));
+                // Re-attach filter listeners every time table re-renders
+                document.getElementById('applyPOFilter')?.addEventListener('click', () => { fromDate = document.getElementById('poFromDate').value; toDate = document.getElementById('poToDate').value; filteredPOs = filterByDateRange(allPOs, fromDate, toDate); renderTable(); });
+                document.getElementById('clearPOFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredPOs = [...allPOs]; renderTable(); });
             };
-            const apply = () => { fromDate = document.getElementById('poFromDate').value; toDate = document.getElementById('poToDate').value; filteredPOs = filterByDateRange(allPOs, fromDate, toDate); renderTable(); };
-            const clear = () => { fromDate = ''; toDate = ''; filteredPOs = [...allPOs]; renderTable(); };
             filteredPOs = [...allPOs];
             renderTable();
-            setTimeout(() => { document.getElementById('applyPOFilter')?.addEventListener('click', apply); document.getElementById('clearPOFilter')?.addEventListener('click', clear); }, 0);
         } catch(err) { showToast('Failed to load purchase orders', 'error'); }
     }
 
@@ -2454,12 +2507,12 @@
                 mainContent.innerHTML = html;
                 document.getElementById('addExpenseBtn')?.addEventListener('click', () => showExpenseModal());
                 document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); }));
+                // Re-attach filter listeners every time table re-renders
+                document.getElementById('applyExpFilter')?.addEventListener('click', () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); });
+                document.getElementById('clearExpFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredExpenses = [...allExpenses]; renderTable(); });
             };
-            const apply = () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); };
-            const clear = () => { fromDate = ''; toDate = ''; filteredExpenses = [...allExpenses]; renderTable(); };
             filteredExpenses = [...allExpenses];
             renderTable();
-            setTimeout(() => { document.getElementById('applyExpFilter')?.addEventListener('click', apply); document.getElementById('clearExpFilter')?.addEventListener('click', clear); }, 0);
         } catch(err) { showToast('Failed to load expenses', 'error'); }
     }
 
@@ -2615,7 +2668,8 @@
             let searchTerm = '';
             let filteredProducts = [...allProducts];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><button class="btn btn-primary" id="addProductBtn">${iconSvg('plus')} Add Item</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary" id="downloadTemplateBtn">${iconSvg('export')} Template</button><button class="btn btn-secondary" id="exportExcelBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-secondary" id="importExcelBtn">${iconSvg('import')} Import Excel</button><button class="btn btn-primary" id="addProductBtn">${iconSvg('plus')} Add Item</button></div></div>
+                <input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}">
@@ -2676,8 +2730,229 @@
             const clear = () => { searchTerm = ''; filteredProducts = [...allProducts]; renderTable(); };
             filteredProducts = [...allProducts];
             renderTable();
-            setTimeout(() => { document.getElementById('applyProdSearch')?.addEventListener('click', apply); document.getElementById('clearProdSearch')?.addEventListener('click', clear); }, 0);
+            setTimeout(() => {
+                document.getElementById('applyProdSearch')?.addEventListener('click', apply);
+                document.getElementById('clearProdSearch')?.addEventListener('click', clear);
+                document.getElementById('downloadTemplateBtn')?.addEventListener('click', downloadInventoryTemplate);
+                document.getElementById('exportExcelBtn')?.addEventListener('click', exportInventoryToExcel);
+                document.getElementById('importExcelBtn')?.addEventListener('click', () => document.getElementById('excelFileInput')?.click());
+                document.getElementById('excelFileInput')?.addEventListener('change', (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        importInventoryFromExcel(e.target.files[0]);
+                        e.target.value = '';
+                    }
+                });
+            }, 0);
         } catch(err) { showToast('Failed to load inventory', 'error'); }
+    }
+
+    // ---- Inventory Excel Export / Import / Template ----
+    function downloadInventoryTemplate() {
+        const headers = [
+            'Type', 'SKU', 'Item Name *', 'Brand', 'Model Number', 'Category',
+            'Fuel Type', 'Capacity (KVA)', 'Output Voltage', 'Phase', 'Frequency (Hz)',
+            'Engine Model', 'Alternator Model', 'Serial Number', 'Manufacturing Year',
+            'Warranty Period (months)', 'Purchase Price (₹)', 'Selling Price (₹)',
+            'GST %', 'Supplier Name', 'Stock Quantity', 'Reorder Level', 'Status'
+        ];
+        const sampleRow = [
+            'Generator', 'GEN-001', 'Sample Generator 5KVA', 'Cummins', 'C5.5D5', 'Generator',
+            'Diesel', '5', '230V', 'Single', '50',
+            '4BTA3.9-G11', 'PI044E', 'SN12345', '2024',
+            '12', '150000', '200000',
+            '18', '', '10', '2', 'In Stock'
+        ];
+        const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
+        // Set column widths
+        ws['!cols'] = headers.map((h, i) => ({ wch: Math.max(h.length, i === 2 ? 25 : 12) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Inventory Template');
+        // Add instructions sheet
+        const instructions = [
+            ['INVENTORY IMPORT INSTRUCTIONS'],
+            [''],
+            ['Column', 'Required', 'Description'],
+            ['Type', 'No', 'Product type: Generator, Accessory, Spare Part, Service'],
+            ['SKU', 'No', 'Unique item code (e.g. GEN-001)'],
+            ['Item Name *', 'YES', 'Item name - REQUIRED'],
+            ['Brand', 'No', 'Brand/manufacturer name'],
+            ['Model Number', 'No', 'Model number'],
+            ['Category', 'No', 'Product category'],
+            ['Fuel Type', 'No', 'Diesel, Petrol, Gas, or Electric'],
+            ['Capacity (KVA)', 'No', 'Generator capacity in KVA'],
+            ['Output Voltage', 'No', 'e.g. 230V, 415V'],
+            ['Phase', 'No', 'Single or Three'],
+            ['Frequency (Hz)', 'No', 'e.g. 50'],
+            ['Engine Model', 'No', 'Engine model number'],
+            ['Alternator Model', 'No', 'Alternator model number'],
+            ['Serial Number', 'No', 'Unique serial number'],
+            ['Manufacturing Year', 'No', 'Year (e.g. 2024)'],
+            ['Warranty Period (months)', 'No', 'Warranty in months'],
+            ['Purchase Price (₹)', 'No', 'Cost/purchase price'],
+            ['Selling Price (₹)', 'No', 'Selling price'],
+            ['GST %', 'No', 'GST rate (default 18%)'],
+            ['Supplier Name', 'No', 'Must match existing supplier name exactly'],
+            ['Stock Quantity', 'No', 'Current stock count'],
+            ['Reorder Level', 'No', 'Low-stock threshold'],
+            ['Status', 'No', 'In Stock, Low Stock, Out of Stock, Discontinued'],
+            [''],
+            ['NOTES:'],
+            ['- Rows with missing Item Name will be skipped'],
+            ['- If SKU matches an existing item, it will be UPDATED'],
+            ['- New SKUs will be added as new items'],
+            ['- Supplier Name must match an existing supplier exactly (case-insensitive)'],
+            ['- Delete the sample row before importing your data']
+        ];
+        const ws2 = XLSX.utils.aoa_to_sheet(instructions);
+        ws2['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 60 }];
+        XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+        XLSX.writeFile(wb, 'genfin_inventory_template.xlsx');
+        showToast('Template downloaded', 'success');
+    }
+
+    async function exportInventoryToExcel() {
+        try {
+            showToast('Preparing export...', 'info');
+            const products = await dbGetAll('products');
+            const suppliers = await dbGetAll('suppliers');
+            const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
+            if (!products.length) {
+                showToast('No inventory items to export', 'info');
+                return;
+            }
+            const headers = [
+                'Type', 'SKU', 'Item Name', 'Brand', 'Model Number', 'Category',
+                'Fuel Type', 'Capacity (KVA)', 'Output Voltage', 'Phase', 'Frequency (Hz)',
+                'Engine Model', 'Alternator Model', 'Serial Number', 'Manufacturing Year',
+                'Warranty Period (months)', 'Purchase Price (₹)', 'Selling Price (₹)',
+                'GST %', 'Supplier Name', 'Stock Quantity', 'Reorder Level', 'Status'
+            ];
+            const rows = products.map(p => [
+                p.type || '', p.sku || '', p.name || '', p.brand || '', p.modelNumber || '', p.category || '',
+                p.fuelType || '', p.capacityKva || '', p.outputVoltage || '', p.phase || '', p.frequency || '',
+                p.engineModel || '', p.alternatorModel || '', p.serialNumber || '', p.manufacturingYear || '',
+                p.warrantyPeriod || '', p.purchasePrice || 0, p.sellingPrice || 0,
+                p.gstRate || 18, supplierMap[p.supplierId] || '', p.stockQuantity || 0, p.reorderLevel || 0, p.status || ''
+            ]);
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+            ws['!cols'] = headers.map((h, i) => ({ wch: Math.max(h.length, 12) }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+            const dateStr = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(wb, `genfin_inventory_${dateStr}.xlsx`);
+            showToast(`Exported ${products.length} items`, 'success');
+        } catch (err) {
+            console.error('Export error:', err);
+            showToast('Error exporting: ' + err.message, 'error');
+        }
+    }
+
+    async function importInventoryFromExcel(file) {
+        try {
+            showToast('Reading file...', 'info');
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            if (!jsonData.length) {
+                showToast('Excel file is empty', 'error');
+                return;
+            }
+            // Map column names (handle both template format and raw names)
+            const colMap = {
+                'type': ['type', 'Type'],
+                'sku': ['sku', 'SKU', 'SKU (Item ID)'],
+                'name': ['Item Name *', 'Item Name', 'name', 'Name'],
+                'brand': ['brand', 'Brand'],
+                'modelNumber': ['Model Number', 'modelNumber', 'Model'],
+                'category': ['category', 'Category'],
+                'fuelType': ['Fuel Type', 'fuelType'],
+                'capacityKva': ['Capacity (KVA)', 'capacityKva', 'Capacity'],
+                'outputVoltage': ['Output Voltage', 'outputVoltage', 'Voltage'],
+                'phase': ['phase', 'Phase'],
+                'frequency': ['Frequency (Hz)', 'frequency', 'Frequency'],
+                'engineModel': ['Engine Model', 'engineModel'],
+                'alternatorModel': ['Alternator Model', 'alternatorModel'],
+                'serialNumber': ['Serial Number', 'serialNumber', 'Serial No'],
+                'manufacturingYear': ['Manufacturing Year', 'manufacturingYear', 'Mfg Year'],
+                'warrantyPeriod': ['Warranty Period (months)', 'warrantyPeriod', 'Warranty'],
+                'purchasePrice': ['Purchase Price (₹)', 'Purchase Price', 'purchasePrice', 'Cost Price'],
+                'sellingPrice': ['Selling Price (₹)', 'Selling Price', 'sellingPrice'],
+                'gstRate': ['GST %', 'gstRate', 'GST'],
+                'supplierName': ['Supplier Name', 'supplierName', 'Supplier'],
+                'stockQuantity': ['Stock Quantity', 'stockQuantity', 'Stock'],
+                'reorderLevel': ['Reorder Level', 'reorderLevel'],
+                'status': ['status', 'Status']
+            };
+            function getColValue(row, field) {
+                const aliases = colMap[field] || [field];
+                for (const alias of aliases) {
+                    if (row[alias] !== undefined && row[alias] !== '') return row[alias];
+                }
+                return '';
+            }
+            // Load existing data for matching
+            const existingProducts = await dbGetAll('products');
+            const suppliers = await dbGetAll('suppliers');
+            const skuMap = {};
+            existingProducts.forEach(p => { if (p.sku) skuMap[p.sku.toLowerCase()] = p; });
+            const supplierNameMap = {};
+            suppliers.forEach(s => { supplierNameMap[s.name.toLowerCase()] = s.id; });
+            let added = 0, updated = 0, skipped = 0;
+            _suppressAutoBackup = true;
+            try {
+                for (const row of jsonData) {
+                    const name = String(getColValue(row, 'name')).trim();
+                    if (!name) { skipped++; continue; }
+                    const sku = String(getColValue(row, 'sku')).trim();
+                    const supplierName = String(getColValue(row, 'supplierName')).trim();
+                    const productObj = {
+                        type: String(getColValue(row, 'type')).trim() || 'Product',
+                        sku: sku,
+                        name: name,
+                        brand: String(getColValue(row, 'brand')).trim(),
+                        modelNumber: String(getColValue(row, 'modelNumber')).trim(),
+                        category: String(getColValue(row, 'category')).trim(),
+                        fuelType: String(getColValue(row, 'fuelType')).trim(),
+                        capacityKva: parseFloat(getColValue(row, 'capacityKva')) || 0,
+                        outputVoltage: String(getColValue(row, 'outputVoltage')).trim(),
+                        phase: String(getColValue(row, 'phase')).trim(),
+                        frequency: String(getColValue(row, 'frequency')).trim(),
+                        engineModel: String(getColValue(row, 'engineModel')).trim(),
+                        alternatorModel: String(getColValue(row, 'alternatorModel')).trim(),
+                        serialNumber: String(getColValue(row, 'serialNumber')).trim(),
+                        manufacturingYear: parseInt(getColValue(row, 'manufacturingYear')) || null,
+                        warrantyPeriod: parseInt(getColValue(row, 'warrantyPeriod')) || null,
+                        purchasePrice: parseFloat(getColValue(row, 'purchasePrice')) || 0,
+                        sellingPrice: parseFloat(getColValue(row, 'sellingPrice')) || 0,
+                        gstRate: parseFloat(getColValue(row, 'gstRate')) || 18,
+                        supplierId: supplierName ? (supplierNameMap[supplierName.toLowerCase()] || null) : null,
+                        stockQuantity: parseInt(getColValue(row, 'stockQuantity')) || 0,
+                        reorderLevel: parseInt(getColValue(row, 'reorderLevel')) || 0,
+                        status: String(getColValue(row, 'status')).trim() || 'In Stock'
+                    };
+                    // Match by SKU for update, or add new
+                    if (sku && skuMap[sku.toLowerCase()]) {
+                        productObj.id = skuMap[sku.toLowerCase()].id;
+                        await dbPut('products', productObj);
+                        updated++;
+                    } else {
+                        await dbAdd('products', productObj);
+                        added++;
+                    }
+                }
+            } finally {
+                _suppressAutoBackup = false;
+                scheduleAutoBackup();
+            }
+            showToast(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped`, 'success');
+            await renderProducts();
+        } catch (err) {
+            console.error('Import error:', err);
+            showToast('Error importing: ' + err.message, 'error');
+            _suppressAutoBackup = false;
+        }
     }
 
     // ---- Show Product Transactions Modal ----
@@ -3573,17 +3848,26 @@
     let currentChart = null;
     let currentTrendChart = null;
 
+    // All report tabs
+    const REPORT_TABS = ['GST', 'Profit', 'Trends', 'Inventory', 'Receivables', 'Expenses', 'TopItems'];
+    const TAB_LABELS = { GST: 'GST Summary', Profit: 'Profitability', Trends: 'Monthly Trends', Inventory: 'Inventory', Receivables: 'Receivables', Expenses: 'Expenses', TopItems: 'Top Items' };
+
+    function setReportTabStyles(activeTab) {
+        REPORT_TABS.forEach(t => {
+            const el = document.getElementById('tab' + t);
+            if (el) el.className = t === activeTab ? 'btn btn-primary' : 'btn btn-outline';
+        });
+    }
+
     async function renderReports() {
         const now = new Date();
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth();
         const html = `
-            <div class="page-header"><h1 class="page-title">Reports</h1></div>
+            <div class="page-header"><h1 class="page-title">Reports & Analytics</h1></div>
             <div class="card">
-                <div style="display: flex; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border);">
-                    <button class="btn btn-outline" id="tabGST">GST Summary</button>
-                    <button class="btn btn-outline" id="tabProfit">Profitability</button>
-                    <button class="btn btn-outline" id="tabTrends">Monthly Trends</button>
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap;">
+                    ${REPORT_TABS.map(t => `<button class="btn btn-outline" id="tab${t}">${TAB_LABELS[t]}</button>`).join('')}
                 </div>
                 <div id="reportControls" class="form-grid" style="margin-bottom:16px;">
                     <div class="form-group"><label>Period</label><select id="reportPeriod"><option value="Weekly">Weekly</option><option value="Monthly">Monthly</option><option value="Quarterly">Quarterly</option><option value="Half-Yearly">Half-Yearly</option><option value="Yearly" selected>Yearly</option></select></div>
@@ -3591,8 +3875,8 @@
                     <div class="form-group" id="reportSubGroup" style="display:none;"><label>Detail</label><div id="reportSubContainer"></div></div>
                     <div class="form-group" style="align-self:end; display:flex; gap:8px;">
                         <button class="btn btn-primary" id="generateReportBtn">Generate</button>
-                        <button class="btn btn-secondary" id="exportCsvBtn">Export Summary CSV</button>
-                        <button class="btn btn-secondary" id="exportFullDataBtn">Export All Invoices & POs (CSV)</button>
+                        <button class="btn btn-secondary" id="exportCsvBtn">Export CSV</button>
+                        <button class="btn btn-secondary" id="exportFullDataBtn">Export All Data (CSV)</button>
                     </div>
                 </div>
             </div>
@@ -3604,6 +3888,12 @@
         const periodSelect = document.getElementById('reportPeriod');
         const subGroup = document.getElementById('reportSubGroup');
         const subContainer = document.getElementById('reportSubContainer');
+        // Hide period controls for tabs that don't need them
+        const noPeriodTabs = ['Inventory', 'TopItems'];
+        function updateControlsVisibility() {
+            const controls = document.getElementById('reportControls');
+            if (controls) controls.style.display = noPeriodTabs.includes(currentTab) ? 'none' : '';
+        }
         function updateSubOptions() {
             const period = periodSelect.value;
             subGroup.style.display = period === 'Yearly' ? 'none' : 'block';
@@ -3630,6 +3920,12 @@
         updateSubOptions();
         periodSelect.addEventListener('change', updateSubOptions);
         async function generate() {
+            updateControlsVisibility();
+            if (noPeriodTabs.includes(currentTab)) {
+                if (currentTab === 'Inventory') currentReportData = await generateInventoryReport(true);
+                else if (currentTab === 'TopItems') currentReportData = await generateTopItemsReport(true);
+                return;
+            }
             const period = periodSelect.value;
             const year = parseInt(document.getElementById('reportYear').value) || currentYear;
             let sub = '';
@@ -3639,16 +3935,21 @@
             if (currentTab === 'GST') currentReportData = await generateGSTReport(start, end, period, year, sub, true);
             else if (currentTab === 'Profit') currentReportData = await generateProfitReport(start, end, period, year, sub, true);
             else if (currentTab === 'Trends') await generateTrendsReport(year);
+            else if (currentTab === 'Receivables') currentReportData = await generateReceivablesReport(start, end, period, year, sub, true);
+            else if (currentTab === 'Expenses') currentReportData = await generateExpenseBreakdownReport(start, end, period, year, sub, true);
         }
         document.getElementById('generateReportBtn').addEventListener('click', generate);
-        document.getElementById('exportCsvBtn').addEventListener('click', () => { if (!currentReportData) { showToast('Generate a report first', 'info'); return; } if (currentTab === 'GST') exportGSTToCSV(currentReportData); else if (currentTab === 'Profit') exportProfitToCSV(currentReportData); else showToast('CSV export only for GST/Profit reports', 'info'); });
+        document.getElementById('exportCsvBtn').addEventListener('click', () => { if (!currentReportData) { showToast('Generate a report first', 'info'); return; } if (currentTab === 'GST') exportGSTToCSV(currentReportData); else if (currentTab === 'Profit') exportProfitToCSV(currentReportData); else if (currentTab === 'Receivables' && currentReportData.csvRows) downloadCSV(currentReportData.csvRows, 'receivables_report.csv'); else if (currentTab === 'Expenses' && currentReportData.csvRows) downloadCSV(currentReportData.csvRows, 'expense_report.csv'); else showToast('CSV export available for this report', 'info'); });
         document.getElementById('exportFullDataBtn').addEventListener('click', exportAllTransactionsCSV);
-        document.getElementById('tabGST').addEventListener('click', () => { currentTab = 'GST'; document.getElementById('tabGST').className = 'btn btn-primary'; document.getElementById('tabProfit').className = 'btn btn-outline'; document.getElementById('tabTrends').className = 'btn btn-outline'; generate(); });
-        document.getElementById('tabProfit').addEventListener('click', () => { currentTab = 'Profit'; document.getElementById('tabProfit').className = 'btn btn-primary'; document.getElementById('tabGST').className = 'btn btn-outline'; document.getElementById('tabTrends').className = 'btn btn-outline'; generate(); });
-        document.getElementById('tabTrends').addEventListener('click', () => { currentTab = 'Trends'; document.getElementById('tabTrends').className = 'btn btn-primary'; document.getElementById('tabGST').className = 'btn btn-outline'; document.getElementById('tabProfit').className = 'btn btn-outline'; generate(); });
-        document.getElementById('tabGST').className = 'btn btn-primary';
-        document.getElementById('tabProfit').className = 'btn btn-outline';
-        document.getElementById('tabTrends').className = 'btn btn-outline';
+        // Tab click handlers
+        REPORT_TABS.forEach(t => {
+            document.getElementById('tab' + t)?.addEventListener('click', () => {
+                currentTab = t;
+                setReportTabStyles(t);
+                generate();
+            });
+        });
+        setReportTabStyles('GST');
         await generate();
     }
 
@@ -4185,7 +4486,6 @@
         registerServiceWorker(); // <-- NEW: Register service worker for offline support
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
-        injectIconStyles(); // <-- Add icon styles
         navigateTo('invoices');
         scheduleVersionCheck();
     }).catch(err => {
