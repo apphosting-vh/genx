@@ -620,14 +620,48 @@
     function setAccessToken(token) {
         accessToken = token;
         if (token && gapi && gapi.client) {
-            gapi.client.setToken({ access_token: token });
+            try {
+                gapi.client.setToken({ access_token: token });
+            } catch (e) {
+                console.warn('gapi.client.setToken failed, token stored in accessToken variable:', e);
+                // Fallback: token is stored in accessToken, will be used in fetch calls.
+            }
         }
     }
 
     // ---------- Token refresh with timeout ----------
     function refreshAccessToken(prompt = 'select_account', timeoutMs = 15000) {
         if (!tokenClient) {
-            return Promise.reject(new Error('Token client not available'));
+            // Try to reinitialize token client
+            if (google && google.accounts) {
+                try {
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: GD_CLIENT_ID,
+                        scope: GD_SCOPES,
+                        callback: async (resp) => {
+                            if (resp.error) {
+                                await clearDriveToken();
+                                showToast('Google auth failed: ' + resp.error, 'error');
+                                return;
+                            }
+                            try {
+                                await saveDriveToken(resp.access_token, resp.expires_in, '');
+                                updateDriveUI(true);
+                                showToast('Connected to Google Drive', 'success');
+                                await loadSyncTimestamps();
+                                updateRealTimeSyncUI();
+                                setTimeout(() => checkPendingSync(), 3000);
+                            } catch (e) {
+                                showToast('Error saving token: ' + e.message, 'error');
+                            }
+                        }
+                    });
+                } catch (e) {
+                    return Promise.reject(new Error('Token client not available: ' + e.message));
+                }
+            } else {
+                return Promise.reject(new Error('Token client not available'));
+            }
         }
         if (isRefreshing) {
             return new Promise((resolve, reject) => {
@@ -719,20 +753,36 @@
         }
     }
 
+    // ---- FIXED: saveDriveToken with robust error handling ----
     async function saveDriveToken(token, expiresIn, email) {
-        setAccessToken(token);
-        const expiry = Date.now() + (expiresIn * 1000);
-        tokenExpiry = expiry;
-        currentDriveUserEmail = email || '';
-        await dbSetSetting('gdrive_token', token);
-        await dbSetSetting('gdrive_expiry', expiry);
-        await dbSetSetting('gdrive_email', currentDriveUserEmail);
-        scheduleTokenRefresh(expiry);
-        setSyncState('idle');
-        scheduleAutoBackup();
-        fetchDriveUserEmail().catch(() => {});
-        setTimeout(() => performDailyBackupCheck(), 5000);
-        setTimeout(() => checkPendingSync(), 3000);
+        try {
+            setAccessToken(token);
+            const expiry = Date.now() + (expiresIn * 1000);
+            tokenExpiry = expiry;
+            currentDriveUserEmail = email || '';
+
+            // Wait for IndexedDB to be ready
+            if (!db) {
+                await openDB();
+            }
+
+            await dbSetSetting('gdrive_token', token);
+            await dbSetSetting('gdrive_expiry', expiry);
+            await dbSetSetting('gdrive_email', currentDriveUserEmail);
+            scheduleTokenRefresh(expiry);
+            setSyncState('idle');
+            scheduleAutoBackup();
+            fetchDriveUserEmail().catch(() => {});
+            setTimeout(() => performDailyBackupCheck(), 5000);
+            setTimeout(() => checkPendingSync(), 3000);
+            updateDriveUI(true);
+            updateGlobalSyncIndicator();
+            return true;
+        } catch (err) {
+            console.error('saveDriveToken error:', err);
+            showToast('Failed to save token: ' + err.message, 'error');
+            throw err;
+        }
     }
 
     async function loadDriveToken() {
@@ -921,39 +971,27 @@
                             return;
                         }
                         try {
-                            setAccessToken(resp.access_token);
-                            let email = '';
+                            // FIXED: Use robust saveDriveToken
+                            await saveDriveToken(resp.access_token, resp.expires_in, '');
+                            // Fetch email after saving
                             try {
-                                email = await fetchDriveUserEmail();
+                                const email = await fetchDriveUserEmail();
+                                if (email) {
+                                    currentDriveUserEmail = email;
+                                    await dbSetSetting('gdrive_email', email);
+                                }
                             } catch (emailErr) {
                                 console.warn('Could not fetch user email:', emailErr);
-                                if (emailErr.status === 401) {
-                                    try {
-                                        await silentRefreshAccessToken();
-                                        email = await fetchDriveUserEmail();
-                                    } catch (retryErr) {
-                                        console.warn('Retry for email also failed:', retryErr);
-                                    }
-                                }
                             }
-                            await saveDriveToken(resp.access_token, resp.expires_in, email);
                             updateDriveUI(true);
                             showToast('Connected to Google Drive', 'success');
-                            fetchDriveUserEmail().catch(() => {});
                             await loadSyncTimestamps();
                             updateRealTimeSyncUI();
                             setTimeout(() => checkPendingSync(), 3000);
                         } catch (e) {
-                            try {
-                                await saveDriveToken(resp.access_token, resp.expires_in, '');
-                                updateDriveUI(true);
-                                showToast('Connected (email not available)', 'success');
-                                await loadSyncTimestamps();
-                                updateRealTimeSyncUI();
-                                setTimeout(() => checkPendingSync(), 3000);
-                            } catch (saveErr) {
-                                showToast('Error connecting to Drive: ' + saveErr.message, 'error');
-                            }
+                            showToast('Error saving token: ' + e.message, 'error');
+                            // Reset token client so user can retry
+                            tokenClient = null;
                         }
                     }
                 });
@@ -1013,7 +1051,45 @@
                                 if (authBtn) authBtn.textContent = '🔄 Allow Popups & Retry';
                             }
                         } else {
-                            showToast('Token client not available after init', 'error');
+                            // Re-initialize token client
+                            if (google && google.accounts) {
+                                try {
+                                    tokenClient = google.accounts.oauth2.initTokenClient({
+                                        client_id: GD_CLIENT_ID,
+                                        scope: GD_SCOPES,
+                                        callback: async (resp) => {
+                                            if (resp.error) {
+                                                await clearDriveToken();
+                                                showToast('Google auth failed: ' + resp.error, 'error');
+                                                return;
+                                            }
+                                            try {
+                                                await saveDriveToken(resp.access_token, resp.expires_in, '');
+                                                try {
+                                                    const email = await fetchDriveUserEmail();
+                                                    if (email) {
+                                                        currentDriveUserEmail = email;
+                                                        await dbSetSetting('gdrive_email', email);
+                                                    }
+                                                } catch (emailErr) {}
+                                                updateDriveUI(true);
+                                                showToast('Connected to Google Drive', 'success');
+                                                await loadSyncTimestamps();
+                                                updateRealTimeSyncUI();
+                                                setTimeout(() => checkPendingSync(), 3000);
+                                            } catch (e) {
+                                                showToast('Error saving token: ' + e.message, 'error');
+                                                tokenClient = null;
+                                            }
+                                        }
+                                    });
+                                    tokenClient.requestAccessToken({ prompt: 'select_account' });
+                                } catch (reinitErr) {
+                                    showToast('Error initializing Google Sign-In: ' + reinitErr.message, 'error');
+                                }
+                            } else {
+                                showToast('Google Sign-In not available', 'error');
+                            }
                         }
                     })
                     .catch(err => {
@@ -1032,7 +1108,45 @@
                         if (authBtn) authBtn.textContent = '🔄 Allow Popups & Retry';
                     }
                 } else {
-                    showToast('Token client not available', 'error');
+                    // Re-initialize token client
+                    if (google && google.accounts) {
+                        try {
+                            tokenClient = google.accounts.oauth2.initTokenClient({
+                                client_id: GD_CLIENT_ID,
+                                scope: GD_SCOPES,
+                                callback: async (resp) => {
+                                    if (resp.error) {
+                                        await clearDriveToken();
+                                        showToast('Google auth failed: ' + resp.error, 'error');
+                                        return;
+                                    }
+                                    try {
+                                        await saveDriveToken(resp.access_token, resp.expires_in, '');
+                                        try {
+                                            const email = await fetchDriveUserEmail();
+                                            if (email) {
+                                                currentDriveUserEmail = email;
+                                                await dbSetSetting('gdrive_email', email);
+                                            }
+                                        } catch (emailErr) {}
+                                        updateDriveUI(true);
+                                        showToast('Connected to Google Drive', 'success');
+                                        await loadSyncTimestamps();
+                                        updateRealTimeSyncUI();
+                                        setTimeout(() => checkPendingSync(), 3000);
+                                    } catch (e) {
+                                        showToast('Error saving token: ' + e.message, 'error');
+                                        tokenClient = null;
+                                    }
+                                }
+                            });
+                            tokenClient.requestAccessToken({ prompt: 'select_account' });
+                        } catch (reinitErr) {
+                            showToast('Error initializing Google Sign-In: ' + reinitErr.message, 'error');
+                        }
+                    } else {
+                        showToast('Google Sign-In not available', 'error');
+                    }
                 }
             }
         } catch (err) {
