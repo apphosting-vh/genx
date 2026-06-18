@@ -10,6 +10,7 @@
 // + Google Drive sync bug fixes (silent refresh, no auto-popup, timeout, UI updates)
 // + Fixed "Refresh token request timed out" error: silent refresh failures set state to expired, no toast
 // + REAL-TIME SYNC: every change syncs to genfin_cloud_sync.json with offline support and timestamps
+// + FIXED: Maximum call stack size exceeded (recursive update loop)
 
 (function() {
     'use strict';
@@ -18,7 +19,7 @@
     const ICONS = {
         plus: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>`,
         export: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>`,
-        import: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" /></svg>`, // upload (rotated)
+        import: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" /></svg>`,
         cloud: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>`,
         save: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>`,
         trash: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`,
@@ -29,10 +30,10 @@
         folder: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>`,
         calendar: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>`,
         clock: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
-        sync: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`, // refresh
-        spinner: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="animate-spin"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`, // we can add animation via CSS
+        sync: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`,
+        spinner: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="animate-spin"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`,
         close: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>`,
-        power: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>` // optional
+        power: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>`
     };
 
     function iconSvg(name, className = '') {
@@ -70,11 +71,11 @@
         `;
         document.head.appendChild(style);
     }
-    injectIconStyles(); // Inject icon styles immediately before any rendering
+    injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.0.0'; // Update this on each release
-    const VERSION_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
+    const APP_VERSION = '1.0.0';
+    const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
     // ---------- IndexedDB wrapper ----------
@@ -84,41 +85,28 @@
 
     const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
 
-    // ---------- Constants for dropdowns ----------
     const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue'];
     const PAYMENT_TERMS = ['Immediate', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
     const PO_STATUSES = ['Pending', 'Received', 'Cancelled'];
     const PRODUCT_TYPES = ['Generator', 'Accessory', 'Spare Part', 'Service'];
     const PRODUCT_STATUSES = ['In Stock', 'Low Stock', 'Out of Stock', 'Discontinued'];
 
-    // Global flag to suppress auto-backup during restore
     let _suppressAutoBackup = false;
 
-    // ---------- Service Worker Registration (production-grade) ----------
+    // ---------- Service Worker Registration ----------
     function registerServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
-
         const basePath = window.location.pathname.replace(/\/[^/]*$/, '/') || '/';
-
         navigator.serviceWorker.register('./sw.js', { scope: basePath })
             .then(reg => {
                 console.log('Service Worker registered with scope:', reg.scope);
-
-                // On page load, if there's a waiting worker, show update prompt
-                if (reg.waiting) {
-                    showUpdatePrompt(reg.waiting);
-                }
-
+                if (reg.waiting) showUpdatePrompt(reg.waiting);
                 reg.addEventListener('updatefound', () => {
                     const newWorker = reg.installing;
                     if (!newWorker) return;
                     newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed') {
-                            if (navigator.serviceWorker.controller) {
-                                // New version installed, show update prompt
-                                showUpdatePrompt(newWorker);
-                            }
-                            // else: first install, no prompt needed
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            showUpdatePrompt(newWorker);
                         }
                     });
                 });
@@ -126,15 +114,10 @@
             .catch(err => console.warn('Service Worker registration failed:', err));
     }
 
-    // Show a one-time update prompt; user clicks to activate new SW
     function showUpdatePrompt(worker) {
-        // Don't show if already dismissed this session
         if (sessionStorage.getItem('update_prompt_dismissed')) return;
-
         const container = document.getElementById('toastContainer');
         if (!container) return;
-
-        // Remove any existing update toast
         const existing = container.querySelector('.toast-update');
         if (existing) existing.remove();
 
@@ -155,7 +138,6 @@
             sessionStorage.setItem('update_prompt_dismissed', '1');
             toast.remove();
         });
-
         container.appendChild(toast);
     }
 
@@ -190,7 +172,6 @@
                 if (!_suppressAutoBackup) {
                     scheduleAutoBackup();
                     scheduleLocalFileWrite();
-                    // Real‑time sync
                     updateLocalChangeTimestamp();
                     scheduleRealTimeSync();
                 }
@@ -209,7 +190,6 @@
                 if (!_suppressAutoBackup) {
                     scheduleAutoBackup();
                     scheduleLocalFileWrite();
-                    // Real‑time sync
                     updateLocalChangeTimestamp();
                     scheduleRealTimeSync();
                 }
@@ -248,7 +228,6 @@
                 if (!_suppressAutoBackup) {
                     scheduleAutoBackup();
                     scheduleLocalFileWrite();
-                    // Real‑time sync
                     updateLocalChangeTimestamp();
                     scheduleRealTimeSync();
                 }
@@ -262,11 +241,7 @@
             const tx = db.transaction(storeName, 'readwrite');
             const store = tx.objectStore(storeName);
             const request = store.clear();
-            request.onsuccess = () => {
-                resolve();
-                // Do NOT trigger auto-backup here (will be handled by bulk restore)
-                // But we may want to write local file after bulk operations
-            };
+            request.onsuccess = () => resolve();
             request.onerror = () => reject(request.error);
         });
     }
@@ -302,7 +277,7 @@
         });
     }
 
-    // ---- Atomic increment helpers for invoice/PO numbers (stored in settings) ----
+    // ---- Atomic increment helpers ----
     async function getNextInvoiceNumber() {
         let num = await dbGetSetting('nextInvoiceNumber');
         if (num === null || num === undefined) num = 1;
@@ -340,7 +315,6 @@
             const url = `./app-version.json?t=${Date.now()}`;
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
-                // File doesn't exist (e.g. 404) – not an error, just no version file deployed
                 if (response.status === 404) {
                     console.log('No app-version.json found – skipping version check.');
                 } else {
@@ -351,19 +325,16 @@
             const data = await response.json();
             const remoteVersion = data.version;
             if (!remoteVersion) return;
-
             if (isNewerVersion(remoteVersion, APP_VERSION)) {
                 showUpdateToast(remoteVersion);
             } else {
                 console.log('App is up to date (v' + APP_VERSION + ')');
             }
         } catch (err) {
-            // Network error or JSON parse error – silently ignore
             console.debug('Version check skipped:', err.message);
         }
     }
 
-    // Semantic version comparison: returns true if a > b
     function isNewerVersion(a, b) {
         const pa = a.split('.').map(Number);
         const pb = b.split('.').map(Number);
@@ -379,11 +350,7 @@
     function showUpdateToast(newVersion) {
         const container = document.getElementById('toastContainer');
         if (!container) return;
-
-        // Don't show if already dismissed this session
         if (sessionStorage.getItem('version_toast_dismissed')) return;
-
-        // Remove any existing update toast to avoid duplication
         const existing = container.querySelector('.toast-update');
         if (existing) existing.remove();
 
@@ -407,7 +374,6 @@
         toast.addEventListener('click', async () => {
             await performAppUpdate();
         });
-
         container.appendChild(toast);
         setTimeout(() => {
             if (toast.parentNode) toast.remove();
@@ -426,7 +392,6 @@
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
-            // Use location.reload() without force parameter (deprecated)
             window.location.reload();
         } catch (err) {
             console.error('Update failed:', err);
@@ -462,7 +427,7 @@
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
     const GD_APP_FOLDER_NAME = 'GenFinBackups';
     const GD_BACKUP_FILENAME = 'genfin_latest_backup.json';
-    const CLOUD_SYNC_FILENAME = 'genfin_cloud_sync.json';  // Real‑time sync file
+    const CLOUD_SYNC_FILENAME = 'genfin_cloud_sync.json';
 
     // Sync state machine
     const syncState = {
@@ -477,17 +442,15 @@
     // ---------- Real‑time sync state ----------
     let realTimeSyncDebounceTimer = null;
     let isRealTimeSyncing = false;
-    let pendingSync = false;        // true if changes occurred while offline or sync failed
-    let lastLocalChange = null;     // ISO timestamp of last data modification
-    let lastCloudSync = null;       // ISO timestamp of last successful sync
+    let pendingSync = false;
+    let lastLocalChange = null;
+    let lastCloudSync = null;
 
-    // Load sync timestamps from settings
     async function loadSyncTimestamps() {
         lastLocalChange = await dbGetSetting('lastLocalChange') || null;
         lastCloudSync = await dbGetSetting('lastCloudSync') || null;
     }
 
-    // Update last local change timestamp
     async function updateLocalChangeTimestamp() {
         const now = new Date().toISOString();
         lastLocalChange = now;
@@ -495,22 +458,14 @@
         updateRealTimeSyncUI();
     }
 
-    // Get last cloud sync timestamp
-    async function getCloudSyncTimestamp() {
-        return lastCloudSync;
-    }
-
-    // Set last cloud sync timestamp
     async function setCloudSyncTimestamp(timestamp) {
         lastCloudSync = timestamp;
         await dbSetSetting('lastCloudSync', timestamp);
         updateRealTimeSyncUI();
     }
 
-    // Schedule real‑time sync (debounced)
     function scheduleRealTimeSync() {
         if (!accessToken) {
-            // Not connected – mark pending, but we'll try later when connection is established
             pendingSync = true;
             updateRealTimeSyncUI();
             return;
@@ -519,10 +474,9 @@
         realTimeSyncDebounceTimer = setTimeout(() => {
             realTimeSyncDebounceTimer = null;
             performRealTimeSync();
-        }, 2000); // 2 seconds debounce
+        }, 2000);
     }
 
-    // Perform real‑time sync (upload to genfin_cloud_sync.json)
     async function performRealTimeSync() {
         if (isRealTimeSyncing) return;
         if (!accessToken) {
@@ -541,30 +495,26 @@
         updateRealTimeSyncUI();
 
         try {
-            // Upload to the sync file
             await uploadBackupToDrive(false, CLOUD_SYNC_FILENAME);
-            // On success, update cloud sync timestamp
             const now = new Date().toISOString();
             await setCloudSyncTimestamp(now);
             pendingSync = false;
             updateRealTimeSyncUI();
         } catch (err) {
             console.warn('Real‑time sync failed:', err);
-            pendingSync = true; // will retry on next change or online event
+            pendingSync = true;
             updateRealTimeSyncUI();
         } finally {
             isRealTimeSyncing = false;
         }
     }
 
-    // Check and perform pending sync (called when coming online)
     async function checkPendingSync() {
         if (pendingSync && accessToken && navigator.onLine) {
             await performRealTimeSync();
         }
     }
 
-    // Update UI elements showing sync status and timestamps
     function updateRealTimeSyncUI() {
         const statusEl = document.getElementById('realtimeSyncStatus');
         const localChangeEl = document.getElementById('lastLocalChangeDisplay');
@@ -602,21 +552,11 @@
             statusEl.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;"></span> ${statusText}`;
         }
 
-        // Also update the sidebar sync indicator (if present)
+        // Also update sidebar indicator (which includes real-time status)
         updateGlobalSyncIndicator();
     }
 
-    // Override updateGlobalSyncIndicator to include real‑time status
-    const originalUpdateGlobalSyncIndicator = updateGlobalSyncIndicator;
-    updateGlobalSyncIndicator = function() {
-        // Call original for drive sync status
-        originalUpdateGlobalSyncIndicator();
-        // Also update real‑time status in sidebar? We can add a small indicator next to it.
-        // For simplicity, we'll rely on the main settings UI.
-    };
-
-    // ---------- END Real‑time sync ----------
-
+    // ---------- Drive sync state persistence ----------
     function loadSyncPersist() {
         try {
             syncState.lastSuccessAt = localStorage.getItem('genfin_last_success') || null;
@@ -653,9 +593,7 @@
         saveSyncPersist();
         updateGlobalSyncIndicator();
 
-        // Only show toast for error if it's not a silent refresh failure (we handle that separately)
         if (newState === 'error' && prev !== 'error' && !syncState.errorToastShown) {
-            // Don't show toast for "silent_refresh_timeout" – it's expected when token expired
             if (error && error.includes('silent_refresh_timeout')) {
                 // no toast
             } else {
@@ -670,6 +608,7 @@
             }
             syncState.errorToastShown = false;
         }
+        // Update settings UI but avoid recursion
         updateSettingsUI();
     }
 
@@ -680,13 +619,12 @@
         }
     }
 
-    // ------------------ FIXED: refreshAccessToken with timeout and prompt options ------------------
+    // ---------- Token refresh with timeout ----------
     function refreshAccessToken(prompt = 'select_account', timeoutMs = 15000) {
         if (!tokenClient) {
             return Promise.reject(new Error('Token client not available'));
         }
         if (isRefreshing) {
-            // Wait for the ongoing refresh to complete
             return new Promise((resolve, reject) => {
                 const interval = setInterval(() => {
                     if (!isRefreshing) {
@@ -695,7 +633,6 @@
                         else reject(new Error('Refresh failed'));
                     }
                 }, 100);
-                // Safety timeout
                 setTimeout(() => {
                     clearInterval(interval);
                     reject(new Error('Refresh timed out waiting for previous refresh'));
@@ -709,9 +646,8 @@
             const timeoutId = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
-                    tokenClient.callback = null; // prevent callback after timeout
+                    tokenClient.callback = null;
                     isRefreshing = false;
-                    // For silent refresh, we treat timeout as expected failure, not an error to show
                     if (prompt === 'none') {
                         reject(new Error('silent_refresh_timeout'));
                     } else {
@@ -722,7 +658,7 @@
 
             const originalCallback = tokenClient.callback;
             tokenClient.callback = (resp) => {
-                if (resolved) return; // already timed out
+                if (resolved) return;
                 clearTimeout(timeoutId);
                 tokenClient.callback = originalCallback;
                 isRefreshing = false;
@@ -754,12 +690,9 @@
         });
     }
 
-    // Silent refresh with 'none' – for background token renewal
     function silentRefreshAccessToken() {
         return refreshAccessToken('none', 10000);
     }
-
-    // ------------------ END FIXED refreshAccessToken ------------------
 
     async function withTokenRetry(fn, retry = true) {
         try {
@@ -773,7 +706,6 @@
                     await silentRefreshAccessToken();
                     return await fn();
                 } catch (refreshErr) {
-                    // Silent refresh failed – set state to disconnected and re-throw
                     setSyncState('disconnected', 'Token refresh failed');
                     throw refreshErr;
                 }
@@ -795,7 +727,6 @@
         scheduleAutoBackup();
         fetchDriveUserEmail().catch(() => {});
         setTimeout(() => performDailyBackupCheck(), 5000);
-        // After connecting, attempt any pending real‑time sync
         setTimeout(() => checkPendingSync(), 3000);
     }
 
@@ -821,7 +752,6 @@
         setSyncState('disconnected');
         updateDriveUI(false);
         stopAutoBackup();
-        // Clear real‑time sync state
         pendingSync = false;
         lastLocalChange = null;
         lastCloudSync = null;
@@ -830,13 +760,11 @@
         updateRealTimeSyncUI();
     }
 
-    // ------------------ FIXED: scheduleTokenRefresh – no auto-refresh if already expired ------------------
     function scheduleTokenRefresh(expiry) {
         if (refreshTimer) clearTimeout(refreshTimer);
         const now = Date.now();
         const timeUntilExpiry = expiry - now;
         if (timeUntilExpiry > 5 * 60 * 1000) {
-            // Schedule a refresh 5 minutes before expiry
             const refreshIn = timeUntilExpiry - 5 * 60 * 1000;
             refreshTimer = setTimeout(async () => {
                 if (accessToken && tokenClient) {
@@ -850,7 +778,6 @@
                 }
             }, refreshIn);
         } else if (timeUntilExpiry > 0) {
-            // Token is still valid but very close to expiry; try silent refresh now
             if (accessToken && tokenClient) {
                 silentRefreshAccessToken().catch(err => {
                     console.warn('Immediate silent refresh failed:', err.message);
@@ -859,14 +786,12 @@
                 });
             }
         } else {
-            // Token already expired – do not auto-refresh; just mark expired and update UI
             setSyncState('expired', 'Token expired');
             updateDriveUI(false);
         }
     }
-    // ------------------ END FIXED scheduleTokenRefresh ------------------
 
-    // ------------------ FIXED: initGoogleDriveModule – no auto-popup, proper UI updates ------------------
+    // ---------- Google Drive init ----------
     async function initGoogleDriveModule(force = false) {
         if (driveInitialized && !force) return;
         if (initPromise) return initPromise;
@@ -881,7 +806,6 @@
                 if (stored.token && stored.expiry) {
                     const now = Date.now();
                     if (stored.expiry > now) {
-                        // Token valid – restore it
                         setAccessToken(stored.token);
                         tokenExpiry = stored.expiry;
                         currentDriveUserEmail = stored.email || '';
@@ -892,20 +816,15 @@
                         scheduleAutoBackup();
                         console.log('Drive token restored from DB');
                         setTimeout(() => performDailyBackupCheck(), 5000);
-                        // Load real‑time sync timestamps
                         await loadSyncTimestamps();
                         updateRealTimeSyncUI();
-                        // Check if any pending sync needed (e.g., offline changes)
                         setTimeout(() => checkPendingSync(), 3000);
                     } else {
-                        // Token expired – do NOT auto-refresh; just mark as expired and update UI
                         console.log('Drive token expired, awaiting user action');
                         setSyncState('expired', 'Token expired – please reconnect');
-                        updateDriveUI(false); // show disconnected state
-                        // We do NOT call refreshAccessToken here to avoid popup
+                        updateDriveUI(false);
                     }
                 } else {
-                    // No token stored
                     updateDriveUI(false);
                     setSyncState('disconnected');
                     await loadSyncTimestamps();
@@ -917,7 +836,7 @@
             } catch (err) {
                 driveInitFailed = true;
                 console.warn('Google Drive init failed:', err);
-                updateDriveUI(false); // ensure UI is updated on failure
+                updateDriveUI(false);
                 setSyncState('disconnected', err.message);
                 throw err;
             } finally {
@@ -926,7 +845,6 @@
         })();
         return initPromise;
     }
-    // ------------------ END FIXED initGoogleDriveModule ------------------
 
     function waitForGlobalObjects(timeout = 5000) {
         return new Promise((resolve, reject) => {
@@ -1000,7 +918,6 @@
                             updateDriveUI(true);
                             showToast('Connected to Google Drive', 'success');
                             fetchDriveUserEmail().catch(() => {});
-                            // Load timestamps and check pending sync
                             await loadSyncTimestamps();
                             updateRealTimeSyncUI();
                             setTimeout(() => checkPendingSync(), 3000);
@@ -1055,7 +972,6 @@
         }
     }
 
-    // ------------------ FIXED: signInToGoogle – use 'select_account' to avoid re-consent ------------------
     function signInToGoogle() {
         console.log('signInToGoogle called');
         popupBlocked = false;
@@ -1102,8 +1018,8 @@
             showToast('Error connecting to Google Drive: ' + err.message, 'error');
         }
     }
-    // ------------------ END FIXED signInToGoogle ------------------
 
+    // ---------- Drive file operations ----------
     async function ensureBackupFolder(forceRefresh = false) {
         if (!accessToken) throw new Error('Not connected');
         if (folderIdCache && !forceRefresh) return folderIdCache;
@@ -1193,7 +1109,6 @@
         }
     }
 
-    // Modified to accept filename parameter
     async function uploadBackupToDrive(showToastMsg = true, filename = GD_BACKUP_FILENAME) {
         if (!accessToken) {
             if (showToastMsg) showToast('Not connected to Google Drive', 'error');
@@ -1203,7 +1118,6 @@
         setSyncState('syncing');
         try {
             const folderId = await ensureBackupFolder();
-            // Gather all data including settings
             const customers = await dbGetAll('customers');
             const suppliers = await dbGetAll('suppliers');
             const products = await dbGetAll('products');
@@ -1271,11 +1185,10 @@
                 uploadSuccess = true;
             } catch (err) {
                 if (err.status === 403 && method === 'PATCH') {
-                    console.warn('403 on PATCH, trying to delete and recreate with standard name...');
+                    console.warn('403 on PATCH, trying to delete and recreate...');
                     if (fileId) {
                         await deleteDriveFile(fileId);
                     }
-                    // Now create a new file with the standard name
                     const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
                     const newForm = new FormData();
                     const newMetadata = {
@@ -1314,7 +1227,6 @@
                 fileId = result.id;
             }
 
-            // For backup file, update the backup link and last backup time
             if (filename === GD_BACKUP_FILENAME) {
                 lastBackupFileId = fileId;
                 updateViewBackupLink(lastBackupFileId);
@@ -1323,8 +1235,7 @@
                 updateLastBackupUI();
                 if (showToastMsg) showToast('Backup uploaded to Google Drive', 'success');
             } else {
-                // For sync file, we don't update the view link or backup time
-                // We just return success
+                // sync file – just return success
                 if (showToastMsg) showToast('Sync successful', 'success');
             }
             return true;
@@ -1365,7 +1276,6 @@
             gapi.client.drive.files.get({ fileId, alt: 'media' })
         );
         const backupData = response.result;
-        // Validate version
         if (!backupData.version || backupData.version !== 2) {
             throw new Error('Unsupported backup version. Expected version 2.');
         }
@@ -1378,20 +1288,16 @@
         if (!confirm(confirmMsg)) return false;
 
         showToast('Restoring backup, please wait...', 'info');
-        // Suppress auto-backup during restore
         _suppressAutoBackup = true;
         try {
-            // Clear all stores except settings? Actually we will restore settings from backup, so clear all.
             for (const storeName of stores) {
                 await dbClearStore(storeName);
             }
-            // Restore settings first (if present)
             if (backupData.settings && Array.isArray(backupData.settings)) {
                 for (const setting of backupData.settings) {
                     await dbSetSetting(setting.key, setting.value);
                 }
             }
-            // Then restore data
             for (const customer of backupData.customers) await dbAdd('customers', customer);
             for (const supplier of backupData.suppliers) await dbAdd('suppliers', supplier);
             for (const product of backupData.products) await dbAdd('products', product);
@@ -1407,7 +1313,6 @@
             saveProfile(backupData.profile);
             showToast('Backup restored successfully!', 'success');
             navigateTo('invoices');
-            // Update real‑time sync timestamps after restore
             await loadSyncTimestamps();
             updateRealTimeSyncUI();
             return true;
@@ -1416,9 +1321,7 @@
             return false;
         } finally {
             _suppressAutoBackup = false;
-            // After restore, re-sync state
             scheduleAutoBackup();
-            // Also trigger real‑time sync to update cloud sync file
             scheduleRealTimeSync();
         }
     }
@@ -1471,6 +1374,7 @@
         }
     }
 
+    // ---------- Drive UI updates ----------
     function updateDriveUI(connected) {
         const authPanel = document.getElementById('gdriveAuthPanel');
         const actionsDiv = document.getElementById('gdriveActions');
@@ -1488,9 +1392,7 @@
             `;
             if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
             if (authBtn) authBtn.textContent = 'Connect to Google Drive';
-            // Update daily backup status
             updateDailyBackupStatus();
-            // Update real-time sync UI
             updateRealTimeSyncUI();
         } else {
             authPanel.style.display = 'block';
@@ -1523,7 +1425,6 @@
         }
     }
 
-    // ---- Daily Backup Status (Drive) ----
     async function updateDailyBackupStatus() {
         const statusEl = document.getElementById('dailyBackupStatus');
         if (!statusEl) return;
@@ -1548,6 +1449,7 @@
         }
     }
 
+    // ---------- Sidebar sync indicator (combined Drive + real-time) ----------
     function createSyncIndicator() {
         const footer = document.querySelector('.sidebar-footer');
         if (!footer) return;
@@ -1565,47 +1467,40 @@
     function updateGlobalSyncIndicator() {
         const indicator = document.getElementById('syncIndicator');
         if (!indicator) return;
-        const status = syncState.status;
         let iconHtml = '';
         let color = '#6b7280';
         let tooltip = 'Not connected';
-        // Combine drive sync status and real-time sync status
-        let statusText = '';
+
         if (!accessToken) {
-            statusText = 'Not connected';
             iconHtml = iconSvg('cloud');
             color = '#6b7280';
             tooltip = 'Not connected to Drive';
         } else if (isRealTimeSyncing) {
-            statusText = 'Syncing…';
             iconHtml = iconSvg('refresh', 'animate-spin');
             color = '#f59e0b';
             tooltip = 'Real‑time sync in progress';
         } else if (pendingSync) {
-            statusText = 'Pending';
             iconHtml = iconSvg('clock');
             color = '#ef4444';
             tooltip = 'Changes pending sync';
         } else if (lastLocalChange && lastCloudSync && lastLocalChange <= lastCloudSync) {
-            statusText = 'Synced';
             iconHtml = iconSvg('check');
             color = '#10b981';
             tooltip = 'All changes synced';
         } else {
-            statusText = 'Idle';
             iconHtml = iconSvg('cloud');
             color = '#6b7280';
             tooltip = 'Connected, idle';
         }
         indicator.innerHTML = `<span style="color:${color};">${iconHtml}</span>`;
         indicator.title = tooltip;
-        updateSettingsUI();
+        // Do NOT call updateSettingsUI() here to avoid recursion.
     }
 
-    // ---- Auto-backup scheduling ----
+    // ---------- Auto-backup scheduling ----------
     let autoBackupInterval = null;
     let backupDebounceTimer = null;
-    let backupFrequency = 240; // Default: 4 hours
+    let backupFrequency = 240;
 
     function loadBackupFrequency() {
         const stored = localStorage.getItem('gdrive_backup_frequency');
@@ -1613,7 +1508,6 @@
             const val = parseInt(stored);
             if (val > 0) backupFrequency = val;
         } else {
-            // Default to 4 hours (240 min) if no stored value
             backupFrequency = 240;
             localStorage.setItem('gdrive_backup_frequency', '240');
         }
@@ -1626,7 +1520,7 @@
     }
 
     function scheduleAutoBackup() {
-        const autoEnabled = localStorage.getItem('gdrive_auto_backup') !== 'false'; // default true
+        const autoEnabled = localStorage.getItem('gdrive_auto_backup') !== 'false';
         const connected = accessToken != null;
         if (!autoEnabled || !connected) {
             stopAutoBackup();
@@ -1647,7 +1541,6 @@
         }, intervalMs);
     }
 
-    // ---- Daily backup check (silent) ----
     async function performDailyBackupCheck() {
         if (!accessToken) {
             console.log('Daily backup check: Not connected, skipping.');
@@ -1690,6 +1583,7 @@
         }
     }
 
+    // ---------- Settings UI update (avoids recursion) ----------
     function updateSettingsUI() {
         const statusBadge = document.getElementById('syncStatusBadge');
         const reconnectBtn = document.getElementById('gdriveReconnectBtn');
@@ -1748,10 +1642,8 @@
             viewLink.style.display = 'none';
         }
 
-        // Update daily backup status
         updateDailyBackupStatus();
-        // Update real‑time sync UI
-        updateRealTimeSyncUI();
+        updateRealTimeSyncUI(); // updates the real-time card and also calls updateGlobalSyncIndicator
     }
 
     // ---------- Business Profile ----------
@@ -1769,7 +1661,6 @@
         ifsc: 'SBIN0001234',
         upi: 'genfin@upi',
         invoicePrefix: 'GEN/24-25/',
-        // nextInvoiceNumber and nextPONumber now stored in settings
     };
 
     function getProfile() {
@@ -1780,7 +1671,6 @@
     function saveProfile(profile) {
         localStorage.setItem('genfin_profile', JSON.stringify(profile));
         scheduleLocalFileWrite();
-        // Also trigger real‑time sync
         updateLocalChangeTimestamp();
         scheduleRealTimeSync();
     }
@@ -1832,11 +1722,9 @@
                 selectedGstRate: it.selectedGstRate !== undefined && it.selectedGstRate !== null ? it.selectedGstRate : 18
             };
         });
-        
         const totalOriginalTaxable = itemsWithBase.reduce((sum, i) => sum + i.originalTaxable, 0);
         let discountApplied = Math.min(discount, totalOriginalTaxable);
         let ratio = totalOriginalTaxable > 0 ? (totalOriginalTaxable - discountApplied) / totalOriginalTaxable : 1;
-        
         const processedItems = itemsWithBase.map(it => {
             const discountedTaxable = it.originalTaxable * ratio;
             const gstInfo = getGstRates(stateOfSupply, partyState);
@@ -1844,11 +1732,9 @@
             const effectiveCgst = gstInfo.intra ? gstRate / 2 : 0;
             const effectiveSgst = gstInfo.intra ? gstRate / 2 : 0;
             const effectiveIgst = gstInfo.intra ? 0 : gstRate;
-            
             const cgstAmt = (discountedTaxable * effectiveCgst) / 100;
             const sgstAmt = (discountedTaxable * effectiveSgst) / 100;
             const igstAmt = (discountedTaxable * effectiveIgst) / 100;
-            
             return {
                 productId: it.productId,
                 description: it.description,
@@ -1866,11 +1752,9 @@
                 total: discountedTaxable + cgstAmt + sgstAmt + igstAmt
             };
         });
-        
         const subtotal = processedItems.reduce((s, i) => s + i.taxable, 0);
         const totalTax = processedItems.reduce((s, i) => s + i.cgstAmt + i.sgstAmt + i.igstAmt, 0);
         const grandTotal = subtotal + totalTax;
-        
         return { items: processedItems, subtotal, totalTax, grandTotal };
     }
 
@@ -2019,7 +1903,6 @@
                 offlineIndicator.textContent = 'Online';
                 if (accessToken) {
                     setTimeout(() => performDailyBackupCheck(), 3000);
-                    // Also check pending real‑time sync
                     setTimeout(() => checkPendingSync(), 2000);
                 }
             } else {
@@ -2092,7 +1975,6 @@
                 document.querySelectorAll('.delete-invoice').forEach(btn => btn.addEventListener('click', async () => {
                     if (confirm('Delete this invoice?')) { await dbDelete('invoices', Number(btn.dataset.id)); await renderInvoices(); }
                 }));
-                // Re-attach filter listeners every time table re-renders
                 document.getElementById('applyInvFilter')?.addEventListener('click', () => {
                     fromDate = document.getElementById('invFromDate').value;
                     toDate = document.getElementById('invToDate').value;
@@ -2106,7 +1988,6 @@
                     renderTable();
                 });
             };
-            
             filteredInvoices = [...allInvoices];
             renderTable();
         } catch (err) {
@@ -2203,7 +2084,6 @@
         }
     }
 
-    // Professional PDF Export for Invoices
     async function exportInvoicePDF(id) {
         try {
             const inv = await dbGetById('invoices', id);
@@ -2211,7 +2091,6 @@
             const profile = getProfile();
             const customers = await dbGetAll('customers');
             const customer = customers.find(c => c.id === inv.customerId) || {};
-            
             const printHtml = `
                 <!DOCTYPE html>
                 <html>
@@ -2516,7 +2395,6 @@
                 document.querySelectorAll('.export-po').forEach(btn => btn.addEventListener('click', () => exportPOPDF(Number(btn.dataset.id))));
                 document.querySelectorAll('.mark-received-btn, .mark-cancelled-btn, .mark-pending-btn').forEach(btn => btn.addEventListener('click', async () => { await updatePOStatus(Number(btn.dataset.id), btn.dataset.status); }));
                 document.querySelectorAll('.delete-po').forEach(btn => btn.addEventListener('click', async () => { if (confirm('Delete this PO?')) { await dbDelete('purchaseOrders', Number(btn.dataset.id)); await renderPurchaseOrders(); } }));
-                // Re-attach filter listeners every time table re-renders
                 document.getElementById('applyPOFilter')?.addEventListener('click', () => { fromDate = document.getElementById('poFromDate').value; toDate = document.getElementById('poToDate').value; filteredPOs = filterByDateRange(allPOs, fromDate, toDate); renderTable(); });
                 document.getElementById('clearPOFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredPOs = [...allPOs]; renderTable(); });
             };
@@ -2575,7 +2453,6 @@
         } catch(err) { showToast('Error loading PO details', 'error'); }
     }
 
-    // Professional PDF Export for Purchase Orders
     async function exportPOPDF(id) {
         try {
             const po = await dbGetById('purchaseOrders', id);
@@ -2779,7 +2656,6 @@
                 mainContent.innerHTML = html;
                 document.getElementById('addExpenseBtn')?.addEventListener('click', () => showExpenseModal());
                 document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); }));
-                // Re-attach filter listeners every time table re-renders
                 document.getElementById('applyExpFilter')?.addEventListener('click', () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); });
                 document.getElementById('clearExpFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredExpenses = [...allExpenses]; renderTable(); });
             };
@@ -3035,11 +2911,9 @@
             '18', '', '10', '2', 'In Stock'
         ];
         const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
-        // Set column widths
         ws['!cols'] = headers.map((h, i) => ({ wch: Math.max(h.length, i === 2 ? 25 : 12) }));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Inventory Template');
-        // Add instructions sheet
         const instructions = [
             ['INVENTORY IMPORT INSTRUCTIONS'],
             [''],
@@ -3131,7 +3005,6 @@
                 showToast('Excel file is empty', 'error');
                 return;
             }
-            // Map column names (handle both template format and raw names)
             const colMap = {
                 'type': ['type', 'Type'],
                 'sku': ['sku', 'SKU', 'SKU (Item ID)'],
@@ -3164,7 +3037,6 @@
                 }
                 return '';
             }
-            // Load existing data for matching
             const existingProducts = await dbGetAll('products');
             const suppliers = await dbGetAll('suppliers');
             const skuMap = {};
@@ -3204,7 +3076,6 @@
                         reorderLevel: parseInt(getColValue(row, 'reorderLevel')) || 0,
                         status: String(getColValue(row, 'status')).trim() || 'In Stock'
                     };
-                    // Match by SKU for update, or add new
                     if (sku && skuMap[sku.toLowerCase()]) {
                         productObj.id = skuMap[sku.toLowerCase()].id;
                         await dbPut('products', productObj);
@@ -3242,11 +3113,9 @@
             const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
             const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
 
-            // Find related invoices
             const relatedInvoices = invoices.filter(inv => 
                 inv.items && inv.items.some(item => Number(item.productId) === productId)
             );
-            // Find related POs
             const relatedPOs = purchaseOrders.filter(po => 
                 po.items && po.items.some(item => Number(item.productId) === productId)
             );
@@ -3319,7 +3188,6 @@
                 if (e.target === e.currentTarget) closeModal();
             });
 
-            // Attach view events for invoices and POs inside the modal
             document.querySelectorAll('#productTransactionsModal .view-invoice').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const id = Number(btn.dataset.id);
@@ -3529,7 +3397,6 @@
             syncState.errorToastShown = false;
             syncState.recoveryToastShown = false;
             saveSyncPersist();
-            // Reset real-time sync timestamps
             await dbDeleteSetting('lastLocalChange');
             await dbDeleteSetting('lastCloudSync');
             lastLocalChange = null;
@@ -3885,7 +3752,7 @@
                 </div>
             </div>
 
-            <!-- Real‑time sync status -->
+            <!-- Real‑time sync card -->
             <div class="card">
                 <h3>${iconSvg('sync')} Real‑time Cloud Sync</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">Every change you make (invoices, POs, inventory, etc.) is automatically synced to <code>genfin_cloud_sync.json</code> in your Drive folder. If you're offline, changes are queued and synced when you come back online.</p>
@@ -4032,7 +3899,6 @@
             }
             updateDailyBackupStatus();
         }
-        // Update real-time sync UI
         await loadSyncTimestamps();
         updateRealTimeSyncUI();
     }
@@ -4161,7 +4027,6 @@
     let currentChart = null;
     let currentTrendChart = null;
 
-    // All report tabs
     const REPORT_TABS = ['GST', 'Profit', 'Trends', 'Inventory', 'Receivables', 'Expenses', 'TopItems'];
     const TAB_LABELS = { GST: 'GST Summary', Profit: 'Profitability', Trends: 'Monthly Trends', Inventory: 'Inventory', Receivables: 'Receivables', Expenses: 'Expenses', TopItems: 'Top Items' };
 
@@ -4201,7 +4066,6 @@
         const periodSelect = document.getElementById('reportPeriod');
         const subGroup = document.getElementById('reportSubGroup');
         const subContainer = document.getElementById('reportSubContainer');
-        // Hide period controls for tabs that don't need them
         const noPeriodTabs = ['Inventory', 'TopItems'];
         function updateControlsVisibility() {
             const controls = document.getElementById('reportControls');
@@ -4254,7 +4118,6 @@
         document.getElementById('generateReportBtn').addEventListener('click', generate);
         document.getElementById('exportCsvBtn').addEventListener('click', () => { if (!currentReportData) { showToast('Generate a report first', 'info'); return; } if (currentTab === 'GST') exportGSTToCSV(currentReportData); else if (currentTab === 'Profit') exportProfitToCSV(currentReportData); else if (currentTab === 'Receivables' && currentReportData.csvRows) downloadCSV(currentReportData.csvRows, 'receivables_report.csv'); else if (currentTab === 'Expenses' && currentReportData.csvRows) downloadCSV(currentReportData.csvRows, 'expense_report.csv'); else showToast('CSV export available for this report', 'info'); });
         document.getElementById('exportFullDataBtn').addEventListener('click', exportAllTransactionsCSV);
-        // Tab click handlers
         REPORT_TABS.forEach(t => {
             document.getElementById('tab' + t)?.addEventListener('click', () => {
                 currentTab = t;
@@ -4796,10 +4659,9 @@
     // ---- Start app ----
     openDB().then(async () => {
         updateOnlineStatus();
-        registerServiceWorker(); // <-- NEW: Register service worker for offline support
+        registerServiceWorker();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
-        // Load sync timestamps
         await loadSyncTimestamps();
         updateRealTimeSyncUI();
         navigateTo('invoices');
