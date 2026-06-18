@@ -11,6 +11,9 @@
 // + Fixed "Refresh token request timed out" error: silent refresh failures set state to expired, no toast
 // + REAL-TIME SYNC: every change syncs to genfin_cloud_sync.json with offline support and timestamps
 // + FIXED: Maximum call stack size exceeded (recursive update loop)
+// + FIXED: Token auto-refresh on init – silently refresh expired tokens using prompt:'none'
+// + NEW: GST Summary page with timeframe filter and PDF export
+// + NEW: Notepad module with full CRUD, sync, backup & restore
 
 (function() {
     'use strict';
@@ -33,7 +36,9 @@
         sync: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`,
         spinner: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="animate-spin"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`,
         close: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>`,
-        power: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>`
+        power: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>`,
+        fileText: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+        stickyNote: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`
     };
 
     function iconSvg(name, className = '') {
@@ -80,10 +85,10 @@
 
     // ---------- IndexedDB wrapper ----------
     const DB_NAME = 'GenFinDB';
-    const DB_VERSION = 6;
+    const DB_VERSION = 7; // increment version to add 'notes' store
     let db;
 
-    const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties'];
+    const stores = ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'settings', 'serviceHistory', 'warranties', 'notes'];
 
     const INVOICE_STATUSES = ['Unpaid', 'Paid', 'Overdue'];
     const PAYMENT_TERMS = ['Immediate', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
@@ -791,7 +796,7 @@
         }
     }
 
-    // ---------- Google Drive init ----------
+    // ---------- Google Drive init (now with auto‑refresh) ----------
     async function initGoogleDriveModule(force = false) {
         if (driveInitialized && !force) return;
         if (initPromise) return initPromise;
@@ -806,6 +811,7 @@
                 if (stored.token && stored.expiry) {
                     const now = Date.now();
                     if (stored.expiry > now) {
+                        // Token is still valid – restore it
                         setAccessToken(stored.token);
                         tokenExpiry = stored.expiry;
                         currentDriveUserEmail = stored.email || '';
@@ -820,11 +826,27 @@
                         updateRealTimeSyncUI();
                         setTimeout(() => checkPendingSync(), 3000);
                     } else {
-                        console.log('Drive token expired, awaiting user action');
-                        setSyncState('expired', 'Token expired – please reconnect');
-                        updateDriveUI(false);
+                        // Token expired – attempt silent refresh (no popup)
+                        console.log('Drive token expired, attempting silent refresh...');
+                        try {
+                            await silentRefreshAccessToken();
+                            // If we get here, refresh succeeded
+                            console.log('Silent refresh succeeded');
+                            updateDriveUI(true);
+                            setSyncState('idle');
+                            await loadSyncTimestamps();
+                            updateRealTimeSyncUI();
+                            setTimeout(() => checkPendingSync(), 3000);
+                        } catch (refreshErr) {
+                            // Silent refresh failed – user likely not signed in
+                            console.warn('Silent refresh failed:', refreshErr.message);
+                            setSyncState('expired', 'Token expired – please reconnect');
+                            updateDriveUI(false);
+                            // Do not auto-popup; user must click "Connect"
+                        }
                     }
                 } else {
+                    // No token stored
                     updateDriveUI(false);
                     setSyncState('disconnected');
                     await loadSyncTimestamps();
@@ -1126,6 +1148,7 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
+            const notes = await dbGetAll('notes');
             const settings = await dbGetAll('settings');
             const profile = getProfile();
             const backupData = {
@@ -1140,6 +1163,7 @@
                 expenses,
                 serviceHistory,
                 warranties,
+                notes,
                 settings
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
@@ -1309,6 +1333,9 @@
             }
             if (backupData.warranties) {
                 for (const w of backupData.warranties) await dbAdd('warranties', w);
+            }
+            if (backupData.notes) {
+                for (const n of backupData.notes) await dbAdd('notes', n);
             }
             saveProfile(backupData.profile);
             showToast('Backup restored successfully!', 'success');
@@ -1877,6 +1904,8 @@
                 case 'profile': renderProfile(); break;
                 case 'settings': await renderSettings(); break;
                 case 'service-warranty': await renderServiceWarranty(); break;
+                case 'gst-summary': await renderGSTSummary(); break;
+                case 'notepad': await renderNotepad(); break;
                 default: await renderInvoices();
             }
         } catch (err) {
@@ -3365,7 +3394,7 @@
 
     // ---------- Reset & Delete Data ----------
     async function resetAllData() {
-        const confirmMsg = '⚠️ WARNING: This will permanently DELETE ALL data including customers, suppliers, products, invoices, POs, expenses, service records, warranties, and all settings.\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to proceed?';
+        const confirmMsg = '⚠️ WARNING: This will permanently DELETE ALL data including customers, suppliers, products, invoices, POs, expenses, service records, warranties, notes, and all settings.\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to proceed?';
         if (!confirm(confirmMsg)) {
             showToast('Reset cancelled', 'info');
             return;
@@ -3525,6 +3554,7 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
+            const notes = await dbGetAll('notes');
             const settings = await dbGetAll('settings');
             const profile = getProfile();
             const data = {
@@ -3539,6 +3569,7 @@
                 expenses,
                 serviceHistory,
                 warranties,
+                notes,
                 settings
             };
             const jsonStr = JSON.stringify(data, null, 2);
@@ -3742,7 +3773,7 @@
                                 <a id="viewBackupLink" href="#" target="_blank" style="display:none;">📂 View latest backup in Drive</a>
                             </div>
                             <div style="margin-top: 8px; font-size:0.75rem; color:#6b7280; border-top:1px solid #e5e7eb; padding-top:8px;">
-                                <strong>What gets backed up:</strong> All business data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, and your business profile) in a single JSON file. The backup is stored as <code>genfin_latest_backup.json</code> in your <strong>GenFinBackups</strong> folder on Drive.
+                                <strong>What gets backed up:</strong> All business data (customers, suppliers, products, invoices, purchase orders, expenses, service history, warranties, notes, and your business profile) in a single JSON file. The backup is stored as <code>genfin_latest_backup.json</code> in your <strong>GenFinBackups</strong> folder on Drive.
                             </div>
                             <div style="margin-top: 6px; font-size:0.75rem; background: #fef9e7; padding: 6px; border-radius: 4px; color: #7c6a2d;">
                                 💡 If the popup is blocked, please allow popups for this site and click "Connect" again.
@@ -3755,7 +3786,7 @@
             <!-- Real‑time sync card -->
             <div class="card">
                 <h3>${iconSvg('sync')} Real‑time Cloud Sync</h3>
-                <p style="color: #6b7280; margin-bottom: 12px;">Every change you make (invoices, POs, inventory, etc.) is automatically synced to <code>genfin_cloud_sync.json</code> in your Drive folder. If you're offline, changes are queued and synced when you come back online.</p>
+                <p style="color: #6b7280; margin-bottom: 12px;">Every change you make (invoices, POs, inventory, notes, etc.) is automatically synced to <code>genfin_cloud_sync.json</code> in your Drive folder. If you're offline, changes are queued and synced when you come back online.</p>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #f8fafc; padding: 12px; border-radius: 6px;">
                     <div>
                         <div><strong>Status:</strong> <span id="realtimeSyncStatus">Not connected</span></div>
@@ -3785,7 +3816,7 @@
                     <div><strong>Last write:</strong> <span id="localFileLastWrite">${localFileInfo && localFileInfo.lastWrite ? new Date(localFileInfo.lastWrite).toLocaleString() : 'Never'}</span></div>
                 </div>
                 <div style="margin-top: 12px; font-size:0.75rem; background: #eef2ff; padding: 8px; border-radius: 4px; color: #3730a3;">
-                    ⚙️ The file is updated automatically on every data change (invoices, POs, expenses, inventory, etc.). 
+                    ⚙️ The file is updated automatically on every data change (invoices, POs, expenses, inventory, notes, etc.). 
                     Use this as an additional backup or to migrate data to another device.
                 </div>
             </div>
@@ -3915,6 +3946,7 @@
             const expenses = await dbGetAll('expenses');
             const serviceHistory = await dbGetAll('serviceHistory');
             const warranties = await dbGetAll('warranties');
+            const notes = await dbGetAll('notes');
             const settings = await dbGetAll('settings');
             const profile = getProfile();
             const backupData = {
@@ -3929,6 +3961,7 @@
                 expenses: expenses,
                 serviceHistory: serviceHistory,
                 warranties: warranties,
+                notes: notes,
                 settings: settings
             };
             const jsonStr = JSON.stringify(backupData, null, 2);
@@ -4003,6 +4036,11 @@
                     if (backupData.warranties) {
                         for (const w of backupData.warranties) {
                             await dbAdd('warranties', w);
+                        }
+                    }
+                    if (backupData.notes) {
+                        for (const n of backupData.notes) {
+                            await dbAdd('notes', n);
                         }
                     }
                     saveProfile(backupData.profile);
@@ -4654,6 +4692,487 @@
                 console.error(err);
             }
         });
+    }
+
+    // ---------- NEW: GST Summary Page ----------
+    async function renderGSTSummary() {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        const html = `
+            <div class="page-header"><h1 class="page-title">GST Summary</h1></div>
+            <div class="card">
+                <div class="form-grid" style="margin-bottom:16px;">
+                    <div class="form-group">
+                        <label>Period</label>
+                        <select id="gstPeriod">
+                            <option value="Monthly">Monthly</option>
+                            <option value="Quarterly">Quarterly</option>
+                            <option value="Half-Yearly">Half-Yearly</option>
+                            <option value="Yearly" selected>Yearly</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Year</label>
+                        <input type="number" id="gstYear" value="${currentYear}" style="width:120px;">
+                    </div>
+                    <div class="form-group" id="gstSubGroup" style="display:none;">
+                        <label>Detail</label>
+                        <div id="gstSubContainer"></div>
+                    </div>
+                    <div class="form-group" style="align-self:end; display:flex; gap:8px;">
+                        <button class="btn btn-primary" id="generateGstBtn">Generate</button>
+                        <button class="btn btn-secondary" id="exportGstPdfBtn">Export PDF</button>
+                    </div>
+                </div>
+                <div id="gstSummaryOutput"></div>
+            </div>
+        `;
+        mainContent.innerHTML = html;
+
+        const periodSelect = document.getElementById('gstPeriod');
+        const subGroup = document.getElementById('gstSubGroup');
+        const subContainer = document.getElementById('gstSubContainer');
+
+        function updateSubOptions() {
+            const period = periodSelect.value;
+            subGroup.style.display = period === 'Yearly' ? 'none' : 'block';
+            subContainer.innerHTML = '';
+            if (period === 'Monthly') {
+                const select = document.createElement('select'); select.id = 'gstSub';
+                for (let i = 0; i < 12; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = i;
+                    opt.textContent = new Date(2020, i).toLocaleString('en-IN', { month: 'long' });
+                    if (i === currentMonth) opt.selected = true;
+                    select.appendChild(opt);
+                }
+                subContainer.appendChild(select);
+            } else if (period === 'Quarterly') {
+                const select = document.createElement('select'); select.id = 'gstSub';
+                const quarters = ['Q1 (Apr-Jun)', 'Q2 (Jul-Sep)', 'Q3 (Oct-Dec)', 'Q4 (Jan-Mar)'];
+                quarters.forEach((q, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx + 1;
+                    opt.textContent = q;
+                    if (idx + 1 === Math.floor(currentMonth / 3) + 1) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                subContainer.appendChild(select);
+            } else if (period === 'Half-Yearly') {
+                const select = document.createElement('select'); select.id = 'gstSub';
+                const halves = ['H1 (Apr-Sep)', 'H2 (Oct-Mar)'];
+                halves.forEach((h, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx === 0 ? 'H1' : 'H2';
+                    opt.textContent = h;
+                    if ((idx === 0 && currentMonth < 6) || (idx === 1 && currentMonth >= 6)) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                subContainer.appendChild(select);
+            }
+        }
+        updateSubOptions();
+        periodSelect.addEventListener('change', updateSubOptions);
+
+        async function generateGST() {
+            const period = periodSelect.value;
+            const year = parseInt(document.getElementById('gstYear').value) || currentYear;
+            let sub = '';
+            const subElem = document.getElementById('gstSub');
+            if (subElem) sub = subElem.value;
+            const { start, end } = getDateRange(period, year, sub);
+            const output = document.getElementById('gstSummaryOutput');
+            output.innerHTML = '<p>Loading...</p>';
+
+            try {
+                // Fetch data
+                const allInvoices = await dbGetAll('invoices');
+                const allPOs = await dbGetAll('purchaseOrders');
+                const customers = await dbGetAll('customers');
+                const suppliers = await dbGetAll('suppliers');
+                const customerMap = Object.fromEntries(customers.map(c => [c.id, c]));
+                const supplierMap = Object.fromEntries(suppliers.map(s => [s.id, s]));
+
+                const filterByDate = (items) => items.filter(item => item.date >= start && item.date <= end);
+                const invoices = filterByDate(allInvoices);
+                const pos = filterByDate(allPOs);
+
+                // Build outward table (invoices)
+                let outwardRows = '';
+                let totalOutwardTaxable = 0, totalOutwardCGST = 0, totalOutwardSGST = 0, totalOutwardIGST = 0;
+                invoices.forEach(inv => {
+                    const cust = customerMap[inv.customerId] || {};
+                    const items = inv.items || [];
+                    let invTaxable = 0, invCGST = 0, invSGST = 0, invIGST = 0;
+                    items.forEach(item => {
+                        invTaxable += item.taxable || 0;
+                        invCGST += item.cgstAmt || 0;
+                        invSGST += item.sgstAmt || 0;
+                        invIGST += item.igstAmt || 0;
+                    });
+                    totalOutwardTaxable += invTaxable;
+                    totalOutwardCGST += invCGST;
+                    totalOutwardSGST += invSGST;
+                    totalOutwardIGST += invIGST;
+                    const itemDesc = items.map(it => escapeHtml(it.description)).join(', ');
+                    outwardRows += `<tr>
+                        <td>${escapeHtml(inv.invoiceNumber)}</td>
+                        <td>${formatDate(inv.date)}</td>
+                        <td>${escapeHtml(cust.name || '')}</td>
+                        <td>${escapeHtml(cust.gstin || '')}</td>
+                        <td>${itemDesc}</td>
+                        <td class="text-right">${formatCurrency(invTaxable)}</td>
+                        <td class="text-right">${formatCurrency(invCGST)}</td>
+                        <td class="text-right">${formatCurrency(invSGST)}</td>
+                        <td class="text-right">${formatCurrency(invIGST)}</td>
+                        <td class="text-right">${formatCurrency(invTaxable + invCGST + invSGST + invIGST)}</td>
+                    </tr>`;
+                });
+
+                // Build inward table (purchase orders)
+                let inwardRows = '';
+                let totalInwardTaxable = 0, totalInwardCGST = 0, totalInwardSGST = 0, totalInwardIGST = 0;
+                pos.forEach(po => {
+                    const supp = supplierMap[po.supplierId] || {};
+                    const items = po.items || [];
+                    let poTaxable = 0, poCGST = 0, poSGST = 0, poIGST = 0;
+                    items.forEach(item => {
+                        poTaxable += item.taxable || 0;
+                        poCGST += item.cgstAmt || 0;
+                        poSGST += item.sgstAmt || 0;
+                        poIGST += item.igstAmt || 0;
+                    });
+                    totalInwardTaxable += poTaxable;
+                    totalInwardCGST += poCGST;
+                    totalInwardSGST += poSGST;
+                    totalInwardIGST += poIGST;
+                    const itemDesc = items.map(it => escapeHtml(it.description)).join(', ');
+                    inwardRows += `<tr>
+                        <td>${escapeHtml(po.poNumber)}</td>
+                        <td>${formatDate(po.date)}</td>
+                        <td>${escapeHtml(supp.name || '')}</td>
+                        <td>${escapeHtml(supp.gstin || '')}</td>
+                        <td>${itemDesc}</td>
+                        <td class="text-right">${formatCurrency(poTaxable)}</td>
+                        <td class="text-right">${formatCurrency(poCGST)}</td>
+                        <td class="text-right">${formatCurrency(poSGST)}</td>
+                        <td class="text-right">${formatCurrency(poIGST)}</td>
+                        <td class="text-right">${formatCurrency(poTaxable + poCGST + poSGST + poIGST)}</td>
+                    </tr>`;
+                });
+
+                const netCGST = totalOutwardCGST - totalInwardCGST;
+                const netSGST = totalOutwardSGST - totalInwardSGST;
+                const netIGST = totalOutwardIGST - totalInwardIGST;
+                const netTotalTax = netCGST + netSGST + netIGST;
+
+                const periodLabel = period === 'Monthly' ? `${new Date(year, sub).toLocaleString('en-IN',{month:'long', year:'numeric'})}` :
+                                   period === 'Quarterly' ? `Q${sub} ${year}` :
+                                   period === 'Half-Yearly' ? `${sub} ${year}` : `Year ${year}`;
+
+                const outputHtml = `
+                    <h2>GST Summary: ${periodLabel}</h2>
+                    <div class="stat-row">
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(totalOutwardTaxable)}</div><div class="stat-label">Outward Taxable</div></div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(totalOutwardCGST+totalOutwardSGST+totalOutwardIGST)}</div><div class="stat-label">Outward Tax</div></div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(totalInwardTaxable)}</div><div class="stat-label">Inward Taxable</div></div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(totalInwardCGST+totalInwardSGST+totalInwardIGST)}</div><div class="stat-label">Inward Tax</div></div>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-card" style="background:${netTotalTax >= 0 ? '#fef2f2' : '#ecfdf5'}">
+                            <div class="stat-value" style="color:${netTotalTax >= 0 ? '#dc2626' : '#10b981'};">${formatCurrency(netTotalTax)}</div>
+                            <div class="stat-label">${netTotalTax >= 0 ? 'Net GST Payable' : 'Net GST Refundable'}</div>
+                        </div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(netCGST)}</div><div class="stat-label">Net CGST</div></div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(netSGST)}</div><div class="stat-label">Net SGST</div></div>
+                        <div class="stat-card"><div class="stat-value">${formatCurrency(netIGST)}</div><div class="stat-label">Net IGST</div></div>
+                    </div>
+
+                    <h3>Outward Supplies (Invoices)</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr style="${TABLE_HEADER_STYLE}">
+                                <th>Invoice #</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Items</th>
+                                <th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th>
+                            </tr></thead>
+                            <tbody>
+                                ${outwardRows || `<tr><td colspan="10" class="empty-state">No invoices in this period.</td></tr>`}
+                            </tbody>
+                            ${outwardRows ? `<tfoot style="font-weight:bold; background:#f9fafb;"><tr>
+                                <td colspan="5" class="text-right">Totals</td>
+                                <td class="text-right">${formatCurrency(totalOutwardTaxable)}</td>
+                                <td class="text-right">${formatCurrency(totalOutwardCGST)}</td>
+                                <td class="text-right">${formatCurrency(totalOutwardSGST)}</td>
+                                <td class="text-right">${formatCurrency(totalOutwardIGST)}</td>
+                                <td class="text-right">${formatCurrency(totalOutwardTaxable + totalOutwardCGST + totalOutwardSGST + totalOutwardIGST)}</td>
+                            </tr></tfoot>` : ''}
+                        </table>
+                    </div>
+
+                    <h3>Inward Supplies (Purchase Orders)</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr style="${TABLE_HEADER_STYLE}">
+                                <th>PO #</th><th>Date</th><th>Supplier</th><th>GSTIN</th><th>Items</th>
+                                <th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th>
+                            </tr></thead>
+                            <tbody>
+                                ${inwardRows || `<tr><td colspan="10" class="empty-state">No purchase orders in this period.</td></tr>`}
+                            </tbody>
+                            ${inwardRows ? `<tfoot style="font-weight:bold; background:#f9fafb;"><tr>
+                                <td colspan="5" class="text-right">Totals</td>
+                                <td class="text-right">${formatCurrency(totalInwardTaxable)}</td>
+                                <td class="text-right">${formatCurrency(totalInwardCGST)}</td>
+                                <td class="text-right">${formatCurrency(totalInwardSGST)}</td>
+                                <td class="text-right">${formatCurrency(totalInwardIGST)}</td>
+                                <td class="text-right">${formatCurrency(totalInwardTaxable + totalInwardCGST + totalInwardSGST + totalInwardIGST)}</td>
+                            </tr></tfoot>` : ''}
+                        </table>
+                    </div>
+                `;
+                output.innerHTML = outputHtml;
+                // Store data for PDF export
+                output.dataset.periodLabel = periodLabel;
+                output.dataset.outwardRows = outwardRows;
+                output.dataset.inwardRows = inwardRows;
+                output.dataset.totalOutwardTaxable = totalOutwardTaxable;
+                output.dataset.totalOutwardCGST = totalOutwardCGST;
+                output.dataset.totalOutwardSGST = totalOutwardSGST;
+                output.dataset.totalOutwardIGST = totalOutwardIGST;
+                output.dataset.totalInwardTaxable = totalInwardTaxable;
+                output.dataset.totalInwardCGST = totalInwardCGST;
+                output.dataset.totalInwardSGST = totalInwardSGST;
+                output.dataset.totalInwardIGST = totalInwardIGST;
+                output.dataset.netCGST = netCGST;
+                output.dataset.netSGST = netSGST;
+                output.dataset.netIGST = netIGST;
+                output.dataset.netTotalTax = netTotalTax;
+            } catch (err) {
+                output.innerHTML = `<p style="color:red;">Error generating GST summary: ${err.message}</p>`;
+                console.error(err);
+            }
+        }
+
+        document.getElementById('generateGstBtn').addEventListener('click', generateGST);
+        document.getElementById('exportGstPdfBtn').addEventListener('click', exportGSTSummaryPDF);
+        // Auto-generate on load
+        await generateGST();
+    }
+
+    function exportGSTSummaryPDF() {
+        const output = document.getElementById('gstSummaryOutput');
+        if (!output) return;
+        const periodLabel = output.dataset.periodLabel || 'GST Summary';
+        const outwardRows = output.dataset.outwardRows || '';
+        const inwardRows = output.dataset.inwardRows || '';
+        const totalOutwardTaxable = parseFloat(output.dataset.totalOutwardTaxable) || 0;
+        const totalOutwardCGST = parseFloat(output.dataset.totalOutwardCGST) || 0;
+        const totalOutwardSGST = parseFloat(output.dataset.totalOutwardSGST) || 0;
+        const totalOutwardIGST = parseFloat(output.dataset.totalOutwardIGST) || 0;
+        const totalInwardTaxable = parseFloat(output.dataset.totalInwardTaxable) || 0;
+        const totalInwardCGST = parseFloat(output.dataset.totalInwardCGST) || 0;
+        const totalInwardSGST = parseFloat(output.dataset.totalInwardSGST) || 0;
+        const totalInwardIGST = parseFloat(output.dataset.totalInwardIGST) || 0;
+        const netCGST = parseFloat(output.dataset.netCGST) || 0;
+        const netSGST = parseFloat(output.dataset.netSGST) || 0;
+        const netIGST = parseFloat(output.dataset.netIGST) || 0;
+        const netTotalTax = parseFloat(output.dataset.netTotalTax) || 0;
+
+        const profile = getProfile();
+        const printHtml = `
+            <!DOCTYPE html>
+            <html><head><meta charset="UTF-8"><title>GST Summary - ${periodLabel}</title>
+            <style>
+                body { font-family: 'Inter', Arial, sans-serif; margin: 20px; color: #111827; background: #fff; }
+                .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+                .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #4f46e5; padding-bottom: 15px; }
+                .header h1 { margin: 0; font-size: 28px; color: #4f46e5; }
+                .header p { margin: 5px 0; font-size: 12px; color: #6b7280; }
+                h2 { margin-top: 30px; }
+                .stat-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
+                .stat-card { border: 1px solid #e5e7eb; padding: 12px 16px; border-radius: 6px; flex: 1; min-width: 120px; background: #f9fafb; }
+                .stat-value { font-size: 1.8rem; font-weight: 700; }
+                .stat-label { font-size: 0.7rem; text-transform: uppercase; color: #6b7280; }
+                table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin: 15px 0; }
+                th { background: #4f46e5; color: #fff; padding: 8px 10px; text-align: left; }
+                td { padding: 6px 10px; border: 1px solid #e5e7eb; }
+                .text-right { text-align: right; }
+                tfoot td { font-weight: bold; background: #f3f4f6; }
+                .footer { margin-top: 40px; text-align: center; font-size: 10px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 15px; }
+                @media print { body { padding: 0; } .container { border: none; } }
+            </style>
+            </head>
+            <body>
+            <div class="container">
+                <div class="header">
+                    <h1>${escapeHtml(profile.businessName)}</h1>
+                    <p>${escapeHtml(profile.address)}, ${escapeHtml(profile.city)}, ${escapeHtml(profile.state)} - ${escapeHtml(profile.pincode)}<br>GSTIN: ${escapeHtml(profile.gstin)}</p>
+                    <h2>GST Summary: ${periodLabel}</h2>
+                </div>
+
+                <div class="stat-row">
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalOutwardTaxable)}</div><div class="stat-label">Outward Taxable</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalOutwardCGST+totalOutwardSGST+totalOutwardIGST)}</div><div class="stat-label">Outward Tax</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalInwardTaxable)}</div><div class="stat-label">Inward Taxable</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(totalInwardCGST+totalInwardSGST+totalInwardIGST)}</div><div class="stat-label">Inward Tax</div></div>
+                </div>
+                <div class="stat-row">
+                    <div class="stat-card" style="background:${netTotalTax >= 0 ? '#fef2f2' : '#ecfdf5'};">
+                        <div class="stat-value" style="color:${netTotalTax >= 0 ? '#dc2626' : '#10b981'};">${formatCurrency(netTotalTax)}</div>
+                        <div class="stat-label">${netTotalTax >= 0 ? 'Net GST Payable' : 'Net GST Refundable'}</div>
+                    </div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(netCGST)}</div><div class="stat-label">Net CGST</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(netSGST)}</div><div class="stat-label">Net SGST</div></div>
+                    <div class="stat-card"><div class="stat-value">${formatCurrency(netIGST)}</div><div class="stat-label">Net IGST</div></div>
+                </div>
+
+                <h3>Outward Supplies (Invoices)</h3>
+                <table>
+                    <thead><tr><th>Invoice #</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Items</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
+                    <tbody>${outwardRows || '<tr><td colspan="10" class="text-center">No invoices.</td></tr>'}</tbody>
+                    ${outwardRows ? `<tfoot><tr><td colspan="5" class="text-right">Totals</td><td class="text-right">${formatCurrency(totalOutwardTaxable)}</td><td class="text-right">${formatCurrency(totalOutwardCGST)}</td><td class="text-right">${formatCurrency(totalOutwardSGST)}</td><td class="text-right">${formatCurrency(totalOutwardIGST)}</td><td class="text-right">${formatCurrency(totalOutwardTaxable + totalOutwardCGST + totalOutwardSGST + totalOutwardIGST)}</td></tr></tfoot>` : ''}
+                </table>
+
+                <h3>Inward Supplies (Purchase Orders)</h3>
+                <table>
+                    <thead><tr><th>PO #</th><th>Date</th><th>Supplier</th><th>GSTIN</th><th>Items</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead>
+                    <tbody>${inwardRows || '<tr><td colspan="10" class="text-center">No purchase orders.</td></tr>'}</tbody>
+                    ${inwardRows ? `<tfoot><tr><td colspan="5" class="text-right">Totals</td><td class="text-right">${formatCurrency(totalInwardTaxable)}</td><td class="text-right">${formatCurrency(totalInwardCGST)}</td><td class="text-right">${formatCurrency(totalInwardSGST)}</td><td class="text-right">${formatCurrency(totalInwardIGST)}</td><td class="text-right">${formatCurrency(totalInwardTaxable + totalInwardCGST + totalInwardSGST + totalInwardIGST)}</td></tr></tfoot>` : ''}
+                </table>
+
+                <div class="footer">This is a system generated GST summary. Generated on ${new Date().toLocaleString()}</div>
+            </div>
+            <script>window.print();<\/script>
+            </body></html>
+        `;
+        const win = window.open('', '_blank');
+        win.document.write(printHtml);
+        win.document.close();
+    }
+
+    // ---------- NEW: Notepad Module ----------
+    async function renderNotepad() {
+        const notes = await dbGetAll('notes');
+        notes.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+
+        let listHtml = notes.map(n => `
+            <div class="note-card" data-id="${n.id}">
+                <div class="note-card-title">${escapeHtml(n.title || 'Untitled')}</div>
+                <div class="note-card-preview">${escapeHtml((n.content || '').substring(0, 80))}</div>
+                <div class="note-card-date">${n.updatedAt ? new Date(n.updatedAt).toLocaleString() : new Date(n.createdAt).toLocaleString()}</div>
+            </div>
+        `).join('');
+
+        const html = `
+            <div class="page-header"><h1 class="page-title">Notepad</h1><button class="btn btn-primary" id="newNoteBtn">${iconSvg('plus')} New Note</button></div>
+            <div class="card" style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; align-items: start;">
+                <div>
+                    <h3>Your Notes</h3>
+                    <div class="notes-grid" id="notesList">
+                        ${listHtml || '<p style="color:#6b7280;">No notes yet. Create one!</p>'}
+                    </div>
+                </div>
+                <div>
+                    <h3 id="noteEditorTitle">New Note</h3>
+                    <form id="noteForm">
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input type="text" id="noteTitle" placeholder="Note title" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Content</label>
+                            <textarea id="noteContent" rows="10" placeholder="Write your note here..." style="width:100%;"></textarea>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:10px;">
+                            <button type="submit" class="btn btn-primary">Save</button>
+                            <button type="button" class="btn btn-danger" id="deleteNoteBtn">${iconSvg('trash')} Delete</button>
+                            <button type="button" class="btn btn-outline" id="clearNoteBtn">Clear</button>
+                        </div>
+                        <input type="hidden" id="editNoteId" value="">
+                    </form>
+                </div>
+            </div>
+        `;
+        mainContent.innerHTML = html;
+
+        const notesList = document.getElementById('notesList');
+        const noteTitle = document.getElementById('noteTitle');
+        const noteContent = document.getElementById('noteContent');
+        const editId = document.getElementById('editNoteId');
+        const noteForm = document.getElementById('noteForm');
+        const deleteBtn = document.getElementById('deleteNoteBtn');
+        const clearBtn = document.getElementById('clearNoteBtn');
+        const newNoteBtn = document.getElementById('newNoteBtn');
+
+        function loadNote(note) {
+            noteTitle.value = note.title || '';
+            noteContent.value = note.content || '';
+            editId.value = note.id || '';
+            document.getElementById('noteEditorTitle').textContent = note.id ? 'Edit Note' : 'New Note';
+        }
+
+        function clearEditor() {
+            noteTitle.value = '';
+            noteContent.value = '';
+            editId.value = '';
+            document.getElementById('noteEditorTitle').textContent = 'New Note';
+        }
+
+        // Click on note card to load
+        notesList.addEventListener('click', async (e) => {
+            const card = e.target.closest('.note-card');
+            if (!card) return;
+            const id = Number(card.dataset.id);
+            const note = await dbGetById('notes', id);
+            if (note) loadNote(note);
+        });
+
+        // Save note
+        noteForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = noteTitle.value.trim() || 'Untitled';
+            const content = noteContent.value.trim();
+            const id = editId.value ? Number(editId.value) : null;
+            const now = new Date().toISOString();
+            const noteObj = { title, content, updatedAt: now };
+            if (id) {
+                noteObj.id = id;
+                const existing = await dbGetById('notes', id);
+                noteObj.createdAt = existing.createdAt || now;
+                await dbPut('notes', noteObj);
+                showToast('Note updated', 'success');
+            } else {
+                noteObj.createdAt = now;
+                await dbAdd('notes', noteObj);
+                showToast('Note created', 'success');
+            }
+            await renderNotepad();
+        });
+
+        // Delete note
+        deleteBtn.addEventListener('click', async () => {
+            const id = editId.value;
+            if (!id) { showToast('No note selected to delete', 'warning'); return; }
+            if (confirm('Delete this note?')) {
+                await dbDelete('notes', Number(id));
+                showToast('Note deleted', 'info');
+                await renderNotepad();
+            }
+        });
+
+        // Clear editor
+        clearBtn.addEventListener('click', clearEditor);
+
+        // New note
+        newNoteBtn.addEventListener('click', () => {
+            clearEditor();
+            document.getElementById('noteEditorTitle').textContent = 'New Note';
+            noteTitle.focus();
+        });
+
+        // If no notes, show empty editor
+        if (!notes.length) clearEditor();
     }
 
     // ---- Start app ----

@@ -11,14 +11,18 @@
     <link rel="manifest" href="./manifest.json" />
 
     <!-- SheetJS for Excel import/export -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin="anonymous">
+    </script>
 
     <!-- Chart.js with crossOrigin for caching -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous">
+    </script>
 
     <!-- Google Identity Services & API Client for Drive Backup (NOT cached) -->
-    <script src="https://accounts.google.com/gsi/client"></script>
-    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client">
+    </script>
+    <script src="https://apis.google.com/js/api.js">
+    </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -89,9 +93,9 @@
             -webkit-font-smoothing: antialiased;
         }
 
-        /* ── Sidebar ───────────────────────────────────────────────────── */
+        /* ── Sidebar ── COMPACT VERSION ────────────────────────────────── */
         .sidebar {
-            width: 248px;
+            width: 232px;
             background: var(--sidebar-bg-gradient);
             position: fixed;
             top: 0;
@@ -103,32 +107,40 @@
             transition: transform var(--transition);
             overflow-y: auto;
             overflow-x: hidden;
-            scrollbar-width: none;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
         }
         .sidebar::-webkit-scrollbar {
-            display: none;
+            width: 4px;
+        }
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
         }
 
         .sidebar-header {
-            padding: 24px 20px 20px;
+            padding: 16px 16px 12px;
             border-bottom: 1px solid var(--sidebar-border);
-            margin-bottom: 6px;
+            margin-bottom: 2px;
             flex-shrink: 0;
         }
         .sidebar-header .logo {
-            font-size: 1.2rem;
+            font-size: 1.05rem;
             font-weight: 700;
             color: #fff;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             letter-spacing: -0.3px;
         }
         .logo-icon {
-            width: 32px;
-            height: 32px;
+            width: 28px;
+            height: 28px;
             background: var(--logo-bg);
-            border-radius: 8px;
+            border-radius: 7px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -136,46 +148,46 @@
             box-shadow: 0 2px 8px rgba(249, 115, 22, 0.4);
         }
         .logo-icon svg {
-            width: 17px;
-            height: 17px;
+            width: 15px;
+            height: 15px;
             color: #fff;
         }
         .sidebar-header .subtitle {
-            font-size: 0.7rem;
+            font-size: 0.6rem;
             color: var(--sidebar-label);
-            letter-spacing: 0.4px;
-            margin-top: 3px;
-            margin-left: 42px;
+            letter-spacing: 0.5px;
+            margin-top: 1px;
+            margin-left: 36px;
             font-weight: 500;
         }
 
         .nav-section {
-            padding: 2px 0;
+            padding: 0;
         }
         .nav-label {
-            font-size: 0.6rem;
+            font-size: 0.55rem;
             text-transform: uppercase;
             letter-spacing: 1.2px;
             font-weight: 600;
             color: var(--sidebar-label);
-            padding: 14px 20px 5px;
+            padding: 10px 16px 3px 18px;
         }
 
-        /* ── Nav item base ────────────────────────────────────────────── */
+        /* ── Nav item base ── more compact ────────────────────────────── */
         .nav-item {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 9px 12px 9px 20px;
+            gap: 8px;
+            padding: 6px 10px 6px 18px;
             cursor: pointer;
             transition: all var(--transition);
-            font-size: 0.855rem;
+            font-size: 0.78rem;
             color: var(--sidebar-text);
             user-select: none;
             font-weight: 500;
             position: relative;
-            margin: 1px 10px 1px 0;
-            border-radius: 0 8px 8px 0;
+            margin: 1px 8px 1px 0;
+            border-radius: 0 6px 6px 0;
             letter-spacing: -0.1px;
         }
         .nav-item::before {
@@ -191,8 +203,8 @@
             transition: height var(--transition), background var(--transition);
         }
         .nav-item svg {
-            width: 17px;
-            height: 17px;
+            width: 15px;
+            height: 15px;
             flex-shrink: 0;
             opacity: 0.6;
             transition: opacity var(--transition);
@@ -205,10 +217,9 @@
             opacity: 0.9;
         }
         .nav-item:hover::before {
-            height: 60%;
+            height: 55%;
         }
 
-        /* ── Nav item ACTIVE – unique colors applied via JS ──────────── */
         .nav-item.active {
             color: #fff;
             font-weight: 600;
@@ -218,25 +229,25 @@
             opacity: 1;
         }
         .nav-item.active::before {
-            height: 70%;
+            height: 65%;
             background: #fff !important;
         }
 
-        /* ── Sidebar footer ───────────────────────────────────────────── */
+        /* ── Sidebar footer ── compact ────────────────────────────────── */
         .sidebar-footer {
             margin-top: auto;
-            padding: 14px 20px;
+            padding: 10px 16px;
             border-top: 1px solid var(--sidebar-border);
-            font-size: 0.72rem;
+            font-size: 0.65rem;
             color: var(--sidebar-label);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex-shrink: 0;
         }
         .status-dot {
-            width: 7px;
-            height: 7px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
             background: #10b981;
             flex-shrink: 0;
@@ -248,8 +259,8 @@
         /* ── Main content ─────────────────────────────────────────────── */
         .main-content {
             flex: 1;
-            margin-left: 248px;
-            padding: 28px 36px;
+            margin-left: 232px;
+            padding: 24px 30px;
             min-height: 100vh;
             transition: margin var(--transition);
         }
@@ -257,26 +268,26 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 28px;
+            margin-bottom: 22px;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
         }
         .page-title {
-            font-size: 1.6rem;
+            font-size: 1.4rem;
             font-weight: 700;
             color: var(--text);
-            letter-spacing: -0.5px;
+            letter-spacing: -0.4px;
         }
 
         /* ── Buttons ───────────────────────────────────────────────────── */
         .btn {
             display: inline-flex;
             align-items: center;
-            gap: 7px;
-            padding: 9px 16px;
+            gap: 6px;
+            padding: 7px 14px;
             border-radius: var(--radius-sm);
             cursor: pointer;
-            font-size: 0.84rem;
+            font-size: 0.78rem;
             font-weight: 600;
             transition: all var(--transition);
             white-space: nowrap;
@@ -327,13 +338,13 @@
             border-color: #fde68a;
         }
         .btn-sm {
-            padding: 6px 12px;
-            font-size: 0.78rem;
+            padding: 5px 10px;
+            font-size: 0.7rem;
             border-radius: var(--radius-xs);
         }
         .btn-xs {
-            padding: 4px 8px;
-            font-size: 0.7rem;
+            padding: 3px 7px;
+            font-size: 0.65rem;
             border-radius: 4px;
         }
 
@@ -343,21 +354,21 @@
             border-radius: var(--radius);
             box-shadow: var(--shadow-xs);
             border: 1px solid var(--border);
-            padding: 22px;
-            margin-bottom: 18px;
+            padding: 18px 20px;
+            margin-bottom: 16px;
         }
         .stat-row {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-            gap: 14px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
         }
         .stat-card {
             background: var(--card);
             border-radius: var(--radius);
             box-shadow: var(--shadow-xs);
             border: 1px solid var(--border);
-            padding: 18px 20px;
+            padding: 14px 16px;
             transition: box-shadow var(--transition), transform var(--transition);
         }
         .stat-card:hover {
@@ -365,14 +376,14 @@
             box-shadow: var(--shadow-sm);
         }
         .stat-value {
-            font-size: 1.85rem;
+            font-size: 1.6rem;
             font-weight: 700;
             color: var(--text);
-            margin-bottom: 3px;
+            margin-bottom: 2px;
             letter-spacing: -1px;
         }
         .stat-label {
-            font-size: 0.72rem;
+            font-size: 0.65rem;
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.6px;
@@ -387,22 +398,21 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.855rem;
+            font-size: 0.8rem;
         }
         th {
-            padding: 11px 14px;
+            padding: 9px 12px;
             text-align: left;
             font-weight: 600;
             color: #fff;
-            font-size: 0.68rem;
+            font-size: 0.62rem;
             text-transform: uppercase;
-            letter-spacing: 0.6px;
+            letter-spacing: 0.5px;
             border-bottom: none;
             white-space: nowrap;
-            /* background set by JS per page */;
         }
         td {
-            padding: 11px 14px;
+            padding: 9px 12px;
             border-bottom: 1px solid #f1f5f9;
             color: var(--text);
         }
@@ -417,9 +427,9 @@
         .badge {
             display: inline-flex;
             align-items: center;
-            padding: 3px 9px;
+            padding: 2px 8px;
             border-radius: 20px;
-            font-size: 0.68rem;
+            font-size: 0.62rem;
             font-weight: 600;
             letter-spacing: 0.2px;
         }
@@ -456,26 +466,26 @@
             max-width: 760px;
             max-height: 88vh;
             overflow-y: auto;
-            padding: 28px;
+            padding: 24px 28px;
             position: relative;
             border: 1px solid var(--border);
         }
         .modal h3 {
-            font-size: 1.15rem;
+            font-size: 1.05rem;
             font-weight: 700;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             letter-spacing: -0.3px;
         }
         .modal-close {
             position: absolute;
-            top: 16px;
-            right: 18px;
+            top: 14px;
+            right: 16px;
             background: #f1f5f9;
             border: none;
-            font-size: 1.1rem;
+            font-size: 1rem;
             cursor: pointer;
             color: #64748b;
-            padding: 5px 9px;
+            padding: 4px 8px;
             border-radius: var(--radius-xs);
             line-height: 1;
             transition: all var(--transition);
@@ -489,7 +499,7 @@
         .form-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 14px;
+            gap: 12px;
         }
         .form-grid.span-3 {
             grid-template-columns: 1fr 1fr 1fr;
@@ -497,13 +507,13 @@
         .form-group {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 4px;
         }
         .form-group.full {
             grid-column: 1 / -1;
         }
         .form-group label {
-            font-size: 0.72rem;
+            font-size: 0.65rem;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
@@ -512,10 +522,10 @@
         .form-group input,
         .form-group select,
         .form-group textarea {
-            padding: 9px 11px;
+            padding: 8px 10px;
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-sm);
-            font-size: 0.875rem;
+            font-size: 0.82rem;
             font-family: inherit;
             transition: border-color 0.15s, box-shadow 0.15s;
             background: #fff;
@@ -540,14 +550,14 @@
             gap: 8px;
         }
         .toast {
-            padding: 11px 16px;
+            padding: 10px 14px;
             border-radius: 9px;
             color: #fff;
             font-weight: 600;
-            font-size: 0.83rem;
+            font-size: 0.78rem;
             box-shadow: var(--shadow-lg);
             animation: slideIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
-            max-width: 360px;
+            max-width: 340px;
         }
         .toast-success {
             background: #059669;
@@ -578,13 +588,13 @@
             background: var(--sidebar-bg);
             color: #fff;
             border: none;
-            font-size: 1.2rem;
-            padding: 10px;
-            border-radius: 8px;
+            font-size: 1.1rem;
+            padding: 8px 10px;
+            border-radius: 7px;
             cursor: pointer;
             position: fixed;
-            top: 14px;
-            left: 14px;
+            top: 12px;
+            left: 12px;
             z-index: 300;
             box-shadow: var(--shadow);
         }
@@ -592,26 +602,28 @@
         /* ── Misc ──────────────────────────────────────────────────────── */
         .empty-state {
             text-align: center;
-            padding: 48px;
+            padding: 36px 20px;
             color: #94a3b8;
+            font-size: 0.9rem;
         }
         .chart-container {
-            margin: 18px 0;
-            max-height: 340px;
+            margin: 14px 0;
+            max-height: 300px;
         }
 
         /* ── Responsive ────────────────────────────────────────────────── */
         @media (max-width: 768px) {
             .sidebar {
                 transform: translateX(-100%);
+                width: 260px;
             }
             .sidebar.open {
                 transform: translateX(0);
             }
             .main-content {
                 margin-left: 0;
-                padding: 20px 16px;
-                padding-top: 58px;
+                padding: 16px 12px;
+                padding-top: 52px;
             }
             .menu-toggle {
                 display: block;
@@ -631,7 +643,7 @@
             }
             .modal {
                 max-width: 95vw;
-                padding: 20px;
+                padding: 16px 18px;
             }
         }
 
@@ -661,7 +673,7 @@
                 break-inside: avoid;
             }
             table {
-                font-size: 0.75rem;
+                font-size: 0.7rem;
             }
             @page {
                 margin: 0.5cm;
@@ -677,16 +689,109 @@
             }
         }
 
-        /* ── Page color overrides for table headers (set by JS) ────── */
         .table-wrap th {
             transition: background 0.25s ease, color 0.25s ease;
+        }
+
+        /* ── Note card styles ─────────────────────────────────────────── */
+        .notes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 14px;
+            margin-top: 14px;
+        }
+        .note-card {
+            background: #fff;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all var(--transition);
+            box-shadow: var(--shadow-xs);
+        }
+        .note-card:hover {
+            box-shadow: var(--shadow);
+            transform: translateY(-2px);
+        }
+        .note-card-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        .note-card-preview {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .note-card-date {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
+        .note-editor {
+            margin-top: 16px;
+            border-top: 1px solid var(--border);
+            padding-top: 16px;
+        }
+
+        /* ── Status badges for inventory ─────────────────────────────── */
+        .status-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .status-in-stock {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .status-low-stock {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .status-out-of-stock {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .status-discontinued {
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
+        /* ── Filter bar ────────────────────────────────────────────────── */
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        .filter-bar .form-group {
+            margin-bottom: 0;
+        }
+
+        /* ── Real-time sync indicator in sidebar ──────────────────────── */
+        #syncIndicator {
+            margin-left: auto;
+            cursor: default;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+        }
+        #syncIndicator .icon {
+            width: 16px;
+            height: 16px;
         }
     </style>
 </head>
 <body>
 
     <button class="menu-toggle" id="menuToggle" aria-label="Menu">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M3 12h18M3 6h18M3 18h18"/>
         </svg>
     </button>
@@ -704,8 +809,6 @@
             </div>
             <div class="subtitle">Business Manager</div>
         </div>
-
-        <!-- ─── "Main" section removed – Dashboard is gone ─── -->
 
         <div class="nav-section">
             <div class="nav-label">Transactions</div>
@@ -753,6 +856,33 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 Business Profile
             </div>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-label">Reports</div>
+            <div class="nav-item" data-page="gst-summary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                GST Summary
+            </div>
+            <!-- The Analytics (reports) nav item has been removed -->
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-label">Utilities</div>
+            <div class="nav-item" data-page="notepad">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                </svg>
+                Notepad
+            </div>
             <div class="nav-item" data-page="settings">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 Settings
@@ -762,6 +892,7 @@
         <div class="sidebar-footer">
             <span class="status-dot" id="statusDot"></span>
             <span id="offlineIndicator">Online</span>
+            <span id="syncIndicator" style="margin-left:auto; cursor:default; display:inline-flex; align-items:center; gap:4px; font-size:0.65rem;" title="Sync status"></span>
         </div>
     </nav>
 
@@ -775,7 +906,8 @@
     <div class="print-area" id="printArea"></div>
 
     <!-- ─── app-core.js ─────────────────────────────────────────────────── -->
-    <script src="app-core.js"></script>
+    <script src="app-core.js">
+    </script>
 
     <!-- ─── Page Color System ───────────────────────────────────────────── -->
     <script>
@@ -833,6 +965,16 @@
                     primary: '#64748B',
                     dark: '#475569',
                     light: 'rgba(100,116,139,0.22)'
+                },
+                'gst-summary': {
+                    primary: '#8B5CF6',
+                    dark: '#7C3AED',
+                    light: 'rgba(139,92,246,0.22)'
+                },
+                'notepad': {
+                    primary: '#F59E0B',
+                    dark: '#D97706',
+                    light: 'rgba(245,158,11,0.22)'
                 }
             };
 
@@ -845,7 +987,6 @@
                 const colors = PAGE_COLORS[page];
                 if (!colors) return;
 
-                // 1. Update nav items: remove active, then set on target
                 navItems.forEach(el => {
                     el.classList.remove('active');
                     el.style.background = 'transparent';
@@ -858,7 +999,6 @@
                     activeNav.style.boxShadow = `inset 0 0 0 1px ${colors.primary}40, 0 0 20px ${colors.primary}15`;
                 }
 
-                // 2. Style all table headers inside the main content
                 const allTh = mainContent.querySelectorAll('.table-wrap th');
                 allTh.forEach(th => {
                     th.style.background = colors.dark;
@@ -866,7 +1006,6 @@
                     th.style.borderBottom = 'none';
                 });
 
-                // 3. Also style any thead > tr > th directly (fallback)
                 const theadTh = mainContent.querySelectorAll('thead th');
                 theadTh.forEach(th => {
                     th.style.background = colors.dark;
@@ -874,7 +1013,6 @@
                     th.style.borderBottom = 'none';
                 });
 
-                // 4. Store current page on main content for CSS hooks
                 mainContent.dataset.activePage = page;
             }
 
@@ -883,7 +1021,6 @@
                 item.addEventListener('click', function(e) {
                     const page = this.dataset.page;
                     if (!page) return;
-
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             applyPageColors(page);
@@ -946,7 +1083,6 @@
                         return;
                     }
                 }
-                // fallback: Invoices (Dashboard removed)
                 applyPageColors('invoices');
             }
 
