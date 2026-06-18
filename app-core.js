@@ -8,6 +8,8 @@
 // + Product transaction view (Invoices & Purchase Orders linked to inventory items)
 // + Modern SVG icons replacing all emoji icons in the UI
 // + Google Drive sync bug fixes (silent refresh, no auto-popup, timeout, UI updates)
+// + Fixed "Refresh token request timed out" error: silent refresh failures set state to expired, no toast
+// + REAL-TIME SYNC: every change syncs to genfin_cloud_sync.json with offline support and timestamps
 
 (function() {
     'use strict';
@@ -185,8 +187,13 @@
             const request = store.add(item);
             request.onsuccess = () => {
                 resolve(request.result);
-                if (!_suppressAutoBackup) scheduleAutoBackup();
-                scheduleLocalFileWrite();
+                if (!_suppressAutoBackup) {
+                    scheduleAutoBackup();
+                    scheduleLocalFileWrite();
+                    // Real‑time sync
+                    updateLocalChangeTimestamp();
+                    scheduleRealTimeSync();
+                }
             };
             request.onerror = () => reject(request.error);
         });
@@ -199,8 +206,13 @@
             const request = store.put(item);
             request.onsuccess = () => {
                 resolve(request.result);
-                if (!_suppressAutoBackup) scheduleAutoBackup();
-                scheduleLocalFileWrite();
+                if (!_suppressAutoBackup) {
+                    scheduleAutoBackup();
+                    scheduleLocalFileWrite();
+                    // Real‑time sync
+                    updateLocalChangeTimestamp();
+                    scheduleRealTimeSync();
+                }
             };
             request.onerror = () => reject(request.error);
         });
@@ -233,8 +245,13 @@
             const request = store.delete(id);
             request.onsuccess = () => {
                 resolve();
-                if (!_suppressAutoBackup) scheduleAutoBackup();
-                scheduleLocalFileWrite();
+                if (!_suppressAutoBackup) {
+                    scheduleAutoBackup();
+                    scheduleLocalFileWrite();
+                    // Real‑time sync
+                    updateLocalChangeTimestamp();
+                    scheduleRealTimeSync();
+                }
             };
             request.onerror = () => reject(request.error);
         });
@@ -445,6 +462,7 @@
     const GD_SCOPES = 'https://www.googleapis.com/auth/drive.file';
     const GD_APP_FOLDER_NAME = 'GenFinBackups';
     const GD_BACKUP_FILENAME = 'genfin_latest_backup.json';
+    const CLOUD_SYNC_FILENAME = 'genfin_cloud_sync.json';  // Real‑time sync file
 
     // Sync state machine
     const syncState = {
@@ -455,6 +473,149 @@
         errorToastShown: false,
         recoveryToastShown: false,
     };
+
+    // ---------- Real‑time sync state ----------
+    let realTimeSyncDebounceTimer = null;
+    let isRealTimeSyncing = false;
+    let pendingSync = false;        // true if changes occurred while offline or sync failed
+    let lastLocalChange = null;     // ISO timestamp of last data modification
+    let lastCloudSync = null;       // ISO timestamp of last successful sync
+
+    // Load sync timestamps from settings
+    async function loadSyncTimestamps() {
+        lastLocalChange = await dbGetSetting('lastLocalChange') || null;
+        lastCloudSync = await dbGetSetting('lastCloudSync') || null;
+    }
+
+    // Update last local change timestamp
+    async function updateLocalChangeTimestamp() {
+        const now = new Date().toISOString();
+        lastLocalChange = now;
+        await dbSetSetting('lastLocalChange', now);
+        updateRealTimeSyncUI();
+    }
+
+    // Get last cloud sync timestamp
+    async function getCloudSyncTimestamp() {
+        return lastCloudSync;
+    }
+
+    // Set last cloud sync timestamp
+    async function setCloudSyncTimestamp(timestamp) {
+        lastCloudSync = timestamp;
+        await dbSetSetting('lastCloudSync', timestamp);
+        updateRealTimeSyncUI();
+    }
+
+    // Schedule real‑time sync (debounced)
+    function scheduleRealTimeSync() {
+        if (!accessToken) {
+            // Not connected – mark pending, but we'll try later when connection is established
+            pendingSync = true;
+            updateRealTimeSyncUI();
+            return;
+        }
+        if (realTimeSyncDebounceTimer) clearTimeout(realTimeSyncDebounceTimer);
+        realTimeSyncDebounceTimer = setTimeout(() => {
+            realTimeSyncDebounceTimer = null;
+            performRealTimeSync();
+        }, 2000); // 2 seconds debounce
+    }
+
+    // Perform real‑time sync (upload to genfin_cloud_sync.json)
+    async function performRealTimeSync() {
+        if (isRealTimeSyncing) return;
+        if (!accessToken) {
+            pendingSync = true;
+            updateRealTimeSyncUI();
+            return;
+        }
+        if (!navigator.onLine) {
+            pendingSync = true;
+            updateRealTimeSyncUI();
+            return;
+        }
+
+        isRealTimeSyncing = true;
+        pendingSync = false;
+        updateRealTimeSyncUI();
+
+        try {
+            // Upload to the sync file
+            await uploadBackupToDrive(false, CLOUD_SYNC_FILENAME);
+            // On success, update cloud sync timestamp
+            const now = new Date().toISOString();
+            await setCloudSyncTimestamp(now);
+            pendingSync = false;
+            updateRealTimeSyncUI();
+        } catch (err) {
+            console.warn('Real‑time sync failed:', err);
+            pendingSync = true; // will retry on next change or online event
+            updateRealTimeSyncUI();
+        } finally {
+            isRealTimeSyncing = false;
+        }
+    }
+
+    // Check and perform pending sync (called when coming online)
+    async function checkPendingSync() {
+        if (pendingSync && accessToken && navigator.onLine) {
+            await performRealTimeSync();
+        }
+    }
+
+    // Update UI elements showing sync status and timestamps
+    function updateRealTimeSyncUI() {
+        const statusEl = document.getElementById('realtimeSyncStatus');
+        const localChangeEl = document.getElementById('lastLocalChangeDisplay');
+        const cloudSyncEl = document.getElementById('lastCloudSyncDisplay');
+
+        if (localChangeEl) {
+            localChangeEl.textContent = lastLocalChange ? new Date(lastLocalChange).toLocaleString() : 'Never';
+        }
+        if (cloudSyncEl) {
+            cloudSyncEl.textContent = lastCloudSync ? new Date(lastCloudSync).toLocaleString() : 'Never';
+        }
+
+        if (statusEl) {
+            let statusText = '';
+            let color = '#6b7280';
+            if (!accessToken) {
+                statusText = 'Not connected';
+                color = '#6b7280';
+            } else if (isRealTimeSyncing) {
+                statusText = 'Syncing…';
+                color = '#f59e0b';
+            } else if (pendingSync) {
+                statusText = 'Pending sync';
+                color = '#ef4444';
+            } else if (lastLocalChange && lastCloudSync && lastLocalChange <= lastCloudSync) {
+                statusText = '✅ Synced';
+                color = '#10b981';
+            } else if (lastLocalChange && lastCloudSync && lastLocalChange > lastCloudSync) {
+                statusText = '⚠️ Changes pending';
+                color = '#f59e0b';
+            } else {
+                statusText = 'Idle';
+                color = '#6b7280';
+            }
+            statusEl.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;"></span> ${statusText}`;
+        }
+
+        // Also update the sidebar sync indicator (if present)
+        updateGlobalSyncIndicator();
+    }
+
+    // Override updateGlobalSyncIndicator to include real‑time status
+    const originalUpdateGlobalSyncIndicator = updateGlobalSyncIndicator;
+    updateGlobalSyncIndicator = function() {
+        // Call original for drive sync status
+        originalUpdateGlobalSyncIndicator();
+        // Also update real‑time status in sidebar? We can add a small indicator next to it.
+        // For simplicity, we'll rely on the main settings UI.
+    };
+
+    // ---------- END Real‑time sync ----------
 
     function loadSyncPersist() {
         try {
@@ -492,8 +653,14 @@
         saveSyncPersist();
         updateGlobalSyncIndicator();
 
+        // Only show toast for error if it's not a silent refresh failure (we handle that separately)
         if (newState === 'error' && prev !== 'error' && !syncState.errorToastShown) {
-            showToast('⚠️ Drive sync error: ' + (error || 'Unknown error'), 'error');
+            // Don't show toast for "silent_refresh_timeout" – it's expected when token expired
+            if (error && error.includes('silent_refresh_timeout')) {
+                // no toast
+            } else {
+                showToast('⚠️ Drive sync error: ' + (error || 'Unknown error'), 'error');
+            }
             syncState.errorToastShown = true;
         }
         if (newState === 'success' && prev === 'error') {
@@ -538,17 +705,28 @@
 
         isRefreshing = true;
         return new Promise((resolve, reject) => {
+            let resolved = false;
             const timeoutId = setTimeout(() => {
-                tokenClient.callback = null;
-                isRefreshing = false;
-                reject(new Error('Refresh token request timed out'));
+                if (!resolved) {
+                    resolved = true;
+                    tokenClient.callback = null; // prevent callback after timeout
+                    isRefreshing = false;
+                    // For silent refresh, we treat timeout as expected failure, not an error to show
+                    if (prompt === 'none') {
+                        reject(new Error('silent_refresh_timeout'));
+                    } else {
+                        reject(new Error('Refresh token request timed out'));
+                    }
+                }
             }, timeoutMs);
 
             const originalCallback = tokenClient.callback;
             tokenClient.callback = (resp) => {
+                if (resolved) return; // already timed out
                 clearTimeout(timeoutId);
                 tokenClient.callback = originalCallback;
                 isRefreshing = false;
+                resolved = true;
                 if (resp.error) {
                     reject(new Error(resp.error));
                 } else {
@@ -570,6 +748,7 @@
                 clearTimeout(timeoutId);
                 tokenClient.callback = originalCallback;
                 isRefreshing = false;
+                resolved = true;
                 reject(err);
             }
         });
@@ -594,6 +773,7 @@
                     await silentRefreshAccessToken();
                     return await fn();
                 } catch (refreshErr) {
+                    // Silent refresh failed – set state to disconnected and re-throw
                     setSyncState('disconnected', 'Token refresh failed');
                     throw refreshErr;
                 }
@@ -615,6 +795,8 @@
         scheduleAutoBackup();
         fetchDriveUserEmail().catch(() => {});
         setTimeout(() => performDailyBackupCheck(), 5000);
+        // After connecting, attempt any pending real‑time sync
+        setTimeout(() => checkPendingSync(), 3000);
     }
 
     async function loadDriveToken() {
@@ -639,6 +821,13 @@
         setSyncState('disconnected');
         updateDriveUI(false);
         stopAutoBackup();
+        // Clear real‑time sync state
+        pendingSync = false;
+        lastLocalChange = null;
+        lastCloudSync = null;
+        await dbDeleteSetting('lastLocalChange');
+        await dbDeleteSetting('lastCloudSync');
+        updateRealTimeSyncUI();
     }
 
     // ------------------ FIXED: scheduleTokenRefresh – no auto-refresh if already expired ------------------
@@ -654,7 +843,7 @@
                     try {
                         await silentRefreshAccessToken();
                     } catch (err) {
-                        console.warn('Silent token refresh failed:', err);
+                        console.warn('Silent token refresh failed:', err.message);
                         setSyncState('expired', err.message);
                         updateDriveUI(false);
                     }
@@ -664,7 +853,7 @@
             // Token is still valid but very close to expiry; try silent refresh now
             if (accessToken && tokenClient) {
                 silentRefreshAccessToken().catch(err => {
-                    console.warn('Immediate silent refresh failed:', err);
+                    console.warn('Immediate silent refresh failed:', err.message);
                     setSyncState('expired', err.message);
                     updateDriveUI(false);
                 });
@@ -703,6 +892,11 @@
                         scheduleAutoBackup();
                         console.log('Drive token restored from DB');
                         setTimeout(() => performDailyBackupCheck(), 5000);
+                        // Load real‑time sync timestamps
+                        await loadSyncTimestamps();
+                        updateRealTimeSyncUI();
+                        // Check if any pending sync needed (e.g., offline changes)
+                        setTimeout(() => checkPendingSync(), 3000);
                     } else {
                         // Token expired – do NOT auto-refresh; just mark as expired and update UI
                         console.log('Drive token expired, awaiting user action');
@@ -714,6 +908,8 @@
                     // No token stored
                     updateDriveUI(false);
                     setSyncState('disconnected');
+                    await loadSyncTimestamps();
+                    updateRealTimeSyncUI();
                 }
                 driveInitialized = true;
                 driveInitFailed = false;
@@ -804,11 +1000,18 @@
                             updateDriveUI(true);
                             showToast('Connected to Google Drive', 'success');
                             fetchDriveUserEmail().catch(() => {});
+                            // Load timestamps and check pending sync
+                            await loadSyncTimestamps();
+                            updateRealTimeSyncUI();
+                            setTimeout(() => checkPendingSync(), 3000);
                         } catch (e) {
                             try {
                                 await saveDriveToken(resp.access_token, resp.expires_in, '');
                                 updateDriveUI(true);
                                 showToast('Connected (email not available)', 'success');
+                                await loadSyncTimestamps();
+                                updateRealTimeSyncUI();
+                                setTimeout(() => checkPendingSync(), 3000);
                             } catch (saveErr) {
                                 showToast('Error connecting to Drive: ' + saveErr.message, 'error');
                             }
@@ -935,19 +1138,18 @@
         }
     }
 
-    async function getLatestBackupFileId() {
+    async function getLatestBackupFileId(filename = GD_BACKUP_FILENAME) {
         if (!accessToken) return null;
         try {
             const folderId = await ensureBackupFolder();
             const response = await withTokenRetry(() =>
                 gapi.client.drive.files.list({
-                    q: `'${folderId}' in parents and name='${GD_BACKUP_FILENAME}' and trashed=false`,
+                    q: `'${folderId}' in parents and name='${filename}' and trashed=false`,
                     fields: 'files(id, name)',
                 })
             );
             if (response.result.files.length > 0) {
-                lastBackupFileId = response.result.files[0].id;
-                return lastBackupFileId;
+                return response.result.files[0].id;
             }
             return null;
         } catch (err) {
@@ -956,13 +1158,13 @@
         }
     }
 
-    async function getLatestBackupMetadata() {
+    async function getLatestBackupMetadata(filename = GD_BACKUP_FILENAME) {
         if (!accessToken) return null;
         try {
             const folderId = await ensureBackupFolder();
             const response = await withTokenRetry(() =>
                 gapi.client.drive.files.list({
-                    q: `'${folderId}' in parents and name='${GD_BACKUP_FILENAME}' and trashed=false`,
+                    q: `'${folderId}' in parents and name='${filename}' and trashed=false`,
                     fields: 'files(id, name, modifiedTime)',
                     pageSize: 1,
                 })
@@ -991,7 +1193,8 @@
         }
     }
 
-    async function uploadBackupToDrive(showToastMsg = true) {
+    // Modified to accept filename parameter
+    async function uploadBackupToDrive(showToastMsg = true, filename = GD_BACKUP_FILENAME) {
         if (!accessToken) {
             if (showToastMsg) showToast('Not connected to Google Drive', 'error');
             setSyncState('disconnected');
@@ -1028,10 +1231,10 @@
             const jsonStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
 
-            let fileId = await getLatestBackupFileId();
+            let fileId = await getLatestBackupFileId(filename);
             let uploadUrl, method;
             let metadata = {
-                name: GD_BACKUP_FILENAME,
+                name: filename,
                 parents: [folderId],
             };
 
@@ -1072,11 +1275,11 @@
                     if (fileId) {
                         await deleteDriveFile(fileId);
                     }
-                    // Now create a new file with the standard name, not a unique name
+                    // Now create a new file with the standard name
                     const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
                     const newForm = new FormData();
                     const newMetadata = {
-                        name: GD_BACKUP_FILENAME,
+                        name: filename,
                         parents: [folderId],
                     };
                     newForm.append('metadata', new Blob([JSON.stringify(newMetadata)], { type: 'application/json' }));
@@ -1098,9 +1301,8 @@
                     response = retryRes;
                     uploadSuccess = true;
                     const result = await response.json();
-                    lastBackupFileId = result.id;
-                    updateViewBackupLink(lastBackupFileId);
-                    console.log('Created new backup file with ID:', lastBackupFileId);
+                    fileId = result.id;
+                    console.log('Created new file with ID:', fileId);
                     alreadyHandled = true;
                 } else {
                     throw err;
@@ -1109,19 +1311,27 @@
 
             if (uploadSuccess && !alreadyHandled) {
                 const result = await response.json();
-                lastBackupFileId = result.id;
-                updateViewBackupLink(lastBackupFileId);
+                fileId = result.id;
             }
 
-            localStorage.setItem('genfin_last_backup', new Date().toISOString());
-            setSyncState('success');
-            updateLastBackupUI();
-            if (showToastMsg) showToast('Backup uploaded to Google Drive', 'success');
+            // For backup file, update the backup link and last backup time
+            if (filename === GD_BACKUP_FILENAME) {
+                lastBackupFileId = fileId;
+                updateViewBackupLink(lastBackupFileId);
+                localStorage.setItem('genfin_last_backup', new Date().toISOString());
+                setSyncState('success');
+                updateLastBackupUI();
+                if (showToastMsg) showToast('Backup uploaded to Google Drive', 'success');
+            } else {
+                // For sync file, we don't update the view link or backup time
+                // We just return success
+                if (showToastMsg) showToast('Sync successful', 'success');
+            }
             return true;
         } catch (err) {
             console.error('uploadBackupToDrive error:', err);
             setSyncState('error', err.message);
-            if (showToastMsg) showToast('Backup upload failed: ' + err.message, 'error');
+            if (showToastMsg) showToast('Upload failed: ' + err.message, 'error');
             return false;
         }
     }
@@ -1197,6 +1407,9 @@
             saveProfile(backupData.profile);
             showToast('Backup restored successfully!', 'success');
             navigateTo('invoices');
+            // Update real‑time sync timestamps after restore
+            await loadSyncTimestamps();
+            updateRealTimeSyncUI();
             return true;
         } catch (err) {
             showToast('Restore failed: ' + err.message, 'error');
@@ -1205,6 +1418,8 @@
             _suppressAutoBackup = false;
             // After restore, re-sync state
             scheduleAutoBackup();
+            // Also trigger real‑time sync to update cloud sync file
+            scheduleRealTimeSync();
         }
     }
 
@@ -1275,6 +1490,8 @@
             if (authBtn) authBtn.textContent = 'Connect to Google Drive';
             // Update daily backup status
             updateDailyBackupStatus();
+            // Update real-time sync UI
+            updateRealTimeSyncUI();
         } else {
             authPanel.style.display = 'block';
             actionsDiv.style.display = 'none';
@@ -1289,6 +1506,7 @@
             }
             const dailyStatus = document.getElementById('dailyBackupStatus');
             if (dailyStatus) dailyStatus.textContent = 'Not connected';
+            updateRealTimeSyncUI();
         }
         updateGlobalSyncIndicator();
     }
@@ -1314,7 +1532,7 @@
             return;
         }
         try {
-            const meta = await getLatestBackupMetadata();
+            const meta = await getLatestBackupMetadata(GD_BACKUP_FILENAME);
             if (meta && meta.modifiedTime) {
                 const d = new Date(meta.modifiedTime);
                 statusEl.innerHTML = `${iconSvg('check')} ${d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
@@ -1351,37 +1569,33 @@
         let iconHtml = '';
         let color = '#6b7280';
         let tooltip = 'Not connected';
-        switch (status) {
-            case 'idle':
-                iconHtml = iconSvg('cloud');
-                color = '#6b7280';
-                tooltip = 'Connected, idle';
-                break;
-            case 'syncing':
-                iconHtml = iconSvg('refresh', 'animate-spin');
-                color = '#f59e0b';
-                tooltip = 'Syncing...';
-                break;
-            case 'success':
-                iconHtml = iconSvg('check');
-                color = '#10b981';
-                tooltip = 'Last sync: ' + (syncState.lastSuccessAt ? new Date(syncState.lastSuccessAt).toLocaleString() : 'never');
-                break;
-            case 'error':
-                iconHtml = iconSvg('cross');
-                color = '#ef4444';
-                tooltip = 'Sync error: ' + (syncState.lastError || 'unknown');
-                break;
-            case 'expired':
-                iconHtml = iconSvg('clock');
-                color = '#f59e0b';
-                tooltip = 'Token expired – please reconnect';
-                break;
-            default:
-                iconHtml = iconSvg('cloud');
-                color = '#6b7280';
-                tooltip = 'Not connected';
-                break;
+        // Combine drive sync status and real-time sync status
+        let statusText = '';
+        if (!accessToken) {
+            statusText = 'Not connected';
+            iconHtml = iconSvg('cloud');
+            color = '#6b7280';
+            tooltip = 'Not connected to Drive';
+        } else if (isRealTimeSyncing) {
+            statusText = 'Syncing…';
+            iconHtml = iconSvg('refresh', 'animate-spin');
+            color = '#f59e0b';
+            tooltip = 'Real‑time sync in progress';
+        } else if (pendingSync) {
+            statusText = 'Pending';
+            iconHtml = iconSvg('clock');
+            color = '#ef4444';
+            tooltip = 'Changes pending sync';
+        } else if (lastLocalChange && lastCloudSync && lastLocalChange <= lastCloudSync) {
+            statusText = 'Synced';
+            iconHtml = iconSvg('check');
+            color = '#10b981';
+            tooltip = 'All changes synced';
+        } else {
+            statusText = 'Idle';
+            iconHtml = iconSvg('cloud');
+            color = '#6b7280';
+            tooltip = 'Connected, idle';
         }
         indicator.innerHTML = `<span style="color:${color};">${iconHtml}</span>`;
         indicator.title = tooltip;
@@ -1420,7 +1634,7 @@
         }
         if (backupDebounceTimer) clearTimeout(backupDebounceTimer);
         backupDebounceTimer = setTimeout(async () => {
-            await uploadBackupToDrive(false);
+            await uploadBackupToDrive(false, GD_BACKUP_FILENAME);
             backupDebounceTimer = null;
         }, 30000);
 
@@ -1428,7 +1642,7 @@
         const intervalMs = backupFrequency * 60 * 1000;
         autoBackupInterval = setInterval(async () => {
             if (accessToken) {
-                await uploadBackupToDrive(false);
+                await uploadBackupToDrive(false, GD_BACKUP_FILENAME);
             }
         }, intervalMs);
     }
@@ -1446,7 +1660,7 @@
         isDailyBackupRunning = true;
         try {
             console.log('Performing daily backup check...');
-            const latestFile = await getLatestBackupMetadata();
+            const latestFile = await getLatestBackupMetadata(GD_BACKUP_FILENAME);
             const now = new Date();
             let shouldBackup = false;
 
@@ -1467,7 +1681,7 @@
 
             if (shouldBackup) {
                 console.log('Starting silent daily backup...');
-                await uploadBackupToDrive(false);
+                await uploadBackupToDrive(false, GD_BACKUP_FILENAME);
             }
         } catch (err) {
             console.warn('Daily backup check error:', err);
@@ -1536,6 +1750,8 @@
 
         // Update daily backup status
         updateDailyBackupStatus();
+        // Update real‑time sync UI
+        updateRealTimeSyncUI();
     }
 
     // ---------- Business Profile ----------
@@ -1564,6 +1780,9 @@
     function saveProfile(profile) {
         localStorage.setItem('genfin_profile', JSON.stringify(profile));
         scheduleLocalFileWrite();
+        // Also trigger real‑time sync
+        updateLocalChangeTimestamp();
+        scheduleRealTimeSync();
     }
 
     // ---- Service and Warranty ID generators ----
@@ -1800,6 +2019,8 @@
                 offlineIndicator.textContent = 'Online';
                 if (accessToken) {
                     setTimeout(() => performDailyBackupCheck(), 3000);
+                    // Also check pending real‑time sync
+                    setTimeout(() => checkPendingSync(), 2000);
                 }
             } else {
                 statusDot.className = 'status-dot offline';
@@ -3308,6 +3529,13 @@
             syncState.errorToastShown = false;
             syncState.recoveryToastShown = false;
             saveSyncPersist();
+            // Reset real-time sync timestamps
+            await dbDeleteSetting('lastLocalChange');
+            await dbDeleteSetting('lastCloudSync');
+            lastLocalChange = null;
+            lastCloudSync = null;
+            pendingSync = false;
+            updateRealTimeSyncUI();
             showToast('✅ All data has been reset successfully.', 'success');
             navigateTo('invoices');
         } catch (err) {
@@ -3657,6 +3885,22 @@
                 </div>
             </div>
 
+            <!-- Real‑time sync status -->
+            <div class="card">
+                <h3>${iconSvg('sync')} Real‑time Cloud Sync</h3>
+                <p style="color: #6b7280; margin-bottom: 12px;">Every change you make (invoices, POs, inventory, etc.) is automatically synced to <code>genfin_cloud_sync.json</code> in your Drive folder. If you're offline, changes are queued and synced when you come back online.</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #f8fafc; padding: 12px; border-radius: 6px;">
+                    <div>
+                        <div><strong>Status:</strong> <span id="realtimeSyncStatus">Not connected</span></div>
+                        <div><strong>Last local change:</strong> <span id="lastLocalChangeDisplay">Never</span></div>
+                        <div><strong>Last cloud sync:</strong> <span id="lastCloudSyncDisplay">Never</span></div>
+                    </div>
+                    <div style="text-align: right;">
+                        <button class="btn btn-primary btn-sm" id="forceSyncBtn">${iconSvg('refresh')} Sync Now</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <h3>${iconSvg('save')} Local Disk Sync (Save to a JSON file on your computer)</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">
@@ -3685,6 +3929,21 @@
                 <button class="btn btn-danger" id="resetDataBtn">${iconSvg('trash')} Delete All Data & Reset</button>
             </div>
         `;
+
+        // Force sync button
+        document.getElementById('forceSyncBtn')?.addEventListener('click', async () => {
+            if (!accessToken) {
+                showToast('Not connected to Google Drive', 'error');
+                return;
+            }
+            if (!navigator.onLine) {
+                showToast('You are offline. Sync will happen automatically when online.', 'warning');
+                pendingSync = true;
+                updateRealTimeSyncUI();
+                return;
+            }
+            await performRealTimeSync();
+        });
 
         const selectLocalBtn = document.getElementById('selectLocalFileBtn');
         const disconnectLocalBtn = document.getElementById('disconnectLocalFileBtn');
@@ -3719,7 +3978,7 @@
         const reconnectBtn = document.getElementById('gdriveReconnectBtn');
         if (reconnectBtn) reconnectBtn.addEventListener('click', signInToGoogle);
         const backupBtn = document.getElementById('gdriveBackupBtn');
-        if (backupBtn) backupBtn.addEventListener('click', () => uploadBackupToDrive(true));
+        if (backupBtn) backupBtn.addEventListener('click', () => uploadBackupToDrive(true, GD_BACKUP_FILENAME));
         const restoreBtn = document.getElementById('gdriveRestoreBtn');
         if (restoreBtn) restoreBtn.addEventListener('click', showRestoreDialog);
         const disconnectBtn = document.getElementById('gdriveDisconnectBtn');
@@ -3773,6 +4032,9 @@
             }
             updateDailyBackupStatus();
         }
+        // Update real-time sync UI
+        await loadSyncTimestamps();
+        updateRealTimeSyncUI();
     }
 
     // ---------- Local Backup & Restore ----------
@@ -4532,11 +4794,14 @@
     }
 
     // ---- Start app ----
-    openDB().then(() => {
+    openDB().then(async () => {
         updateOnlineStatus();
         registerServiceWorker(); // <-- NEW: Register service worker for offline support
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
+        // Load sync timestamps
+        await loadSyncTimestamps();
+        updateRealTimeSyncUI();
         navigateTo('invoices');
         scheduleVersionCheck();
     }).catch(err => {
