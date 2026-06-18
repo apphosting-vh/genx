@@ -7,6 +7,7 @@
 // + Production-grade service worker with PWA support
 // + Product transaction view (Invoices & Purchase Orders linked to inventory items)
 // + Modern SVG icons replacing all emoji icons in the UI
+// + Google Drive sync bug fixes (silent refresh, no auto-popup, timeout, UI updates)
 
 (function() {
     'use strict';
@@ -512,61 +513,85 @@
         }
     }
 
-    async function refreshAccessToken() {
+    // ------------------ FIXED: refreshAccessToken with timeout and prompt options ------------------
+    function refreshAccessToken(prompt = 'select_account', timeoutMs = 15000) {
         if (!tokenClient) {
-            throw new Error('Token client not available');
+            return Promise.reject(new Error('Token client not available'));
         }
         if (isRefreshing) {
-            return new Promise((resolve) => {
-                const check = () => {
-                    if (!isRefreshing) resolve(accessToken);
-                    else setTimeout(check, 200);
-                };
-                check();
-            });
-        }
-        isRefreshing = true;
-        try {
+            // Wait for the ongoing refresh to complete
             return new Promise((resolve, reject) => {
-                const originalCallback = tokenClient.callback;
-                tokenClient.callback = (resp) => {
-                    tokenClient.callback = originalCallback;
-                    if (resp.error) {
-                        isRefreshing = false;
-                        reject(new Error(resp.error));
-                    } else {
-                        setAccessToken(resp.access_token);
-                        tokenExpiry = Date.now() + (resp.expires_in * 1000);
-                        dbSetSetting('gdrive_token', resp.access_token).then(() => {
-                            dbSetSetting('gdrive_expiry', tokenExpiry);
-                            scheduleTokenRefresh(tokenExpiry);
-                            setSyncState('idle');
-                            isRefreshing = false;
-                            resolve(accessToken);
-                        }).catch(err => {
-                            isRefreshing = false;
-                            reject(err);
-                        });
+                const interval = setInterval(() => {
+                    if (!isRefreshing) {
+                        clearInterval(interval);
+                        if (accessToken) resolve(accessToken);
+                        else reject(new Error('Refresh failed'));
                     }
-                };
-                tokenClient.requestAccessToken({ prompt: '' });
+                }, 100);
+                // Safety timeout
+                setTimeout(() => {
+                    clearInterval(interval);
+                    reject(new Error('Refresh timed out waiting for previous refresh'));
+                }, timeoutMs);
             });
-        } catch (err) {
-            isRefreshing = false;
-            throw err;
         }
+
+        isRefreshing = true;
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                tokenClient.callback = null;
+                isRefreshing = false;
+                reject(new Error('Refresh token request timed out'));
+            }, timeoutMs);
+
+            const originalCallback = tokenClient.callback;
+            tokenClient.callback = (resp) => {
+                clearTimeout(timeoutId);
+                tokenClient.callback = originalCallback;
+                isRefreshing = false;
+                if (resp.error) {
+                    reject(new Error(resp.error));
+                } else {
+                    setAccessToken(resp.access_token);
+                    tokenExpiry = Date.now() + (resp.expires_in * 1000);
+                    dbSetSetting('gdrive_token', resp.access_token).then(() => {
+                        dbSetSetting('gdrive_expiry', tokenExpiry);
+                        scheduleTokenRefresh(tokenExpiry);
+                        setSyncState('idle');
+                        resolve(accessToken);
+                    }).catch(err => {
+                        reject(err);
+                    });
+                }
+            };
+            try {
+                tokenClient.requestAccessToken({ prompt: prompt });
+            } catch (err) {
+                clearTimeout(timeoutId);
+                tokenClient.callback = originalCallback;
+                isRefreshing = false;
+                reject(err);
+            }
+        });
     }
+
+    // Silent refresh with 'none' – for background token renewal
+    function silentRefreshAccessToken() {
+        return refreshAccessToken('none', 10000);
+    }
+
+    // ------------------ END FIXED refreshAccessToken ------------------
 
     async function withTokenRetry(fn, retry = true) {
         try {
             return await fn();
         } catch (err) {
             if (retry && (err.status === 401 || (err.result && err.result.error && err.result.error.code === 401))) {
-                console.warn('401 detected, attempting token refresh');
+                console.warn('401 detected, attempting silent refresh');
                 setSyncState('expired');
                 setAccessToken(null);
                 try {
-                    await refreshAccessToken();
+                    await silentRefreshAccessToken();
                     return await fn();
                 } catch (refreshErr) {
                     setSyncState('disconnected', 'Token refresh failed');
@@ -616,26 +641,43 @@
         stopAutoBackup();
     }
 
+    // ------------------ FIXED: scheduleTokenRefresh – no auto-refresh if already expired ------------------
     function scheduleTokenRefresh(expiry) {
         if (refreshTimer) clearTimeout(refreshTimer);
         const now = Date.now();
         const timeUntilExpiry = expiry - now;
-        const refreshIn = Math.max(0, timeUntilExpiry - 5 * 60 * 1000);
-        if (refreshIn > 0) {
+        if (timeUntilExpiry > 5 * 60 * 1000) {
+            // Schedule a refresh 5 minutes before expiry
+            const refreshIn = timeUntilExpiry - 5 * 60 * 1000;
             refreshTimer = setTimeout(async () => {
                 if (accessToken && tokenClient) {
                     try {
-                        await refreshAccessToken();
+                        await silentRefreshAccessToken();
                     } catch (err) {
                         console.warn('Silent token refresh failed:', err);
+                        setSyncState('expired', err.message);
+                        updateDriveUI(false);
                     }
                 }
             }, refreshIn);
-        } else if (tokenClient) {
-            refreshAccessToken().catch(console.warn);
+        } else if (timeUntilExpiry > 0) {
+            // Token is still valid but very close to expiry; try silent refresh now
+            if (accessToken && tokenClient) {
+                silentRefreshAccessToken().catch(err => {
+                    console.warn('Immediate silent refresh failed:', err);
+                    setSyncState('expired', err.message);
+                    updateDriveUI(false);
+                });
+            }
+        } else {
+            // Token already expired – do not auto-refresh; just mark expired and update UI
+            setSyncState('expired', 'Token expired');
+            updateDriveUI(false);
         }
     }
+    // ------------------ END FIXED scheduleTokenRefresh ------------------
 
+    // ------------------ FIXED: initGoogleDriveModule – no auto-popup, proper UI updates ------------------
     async function initGoogleDriveModule(force = false) {
         if (driveInitialized && !force) return;
         if (initPromise) return initPromise;
@@ -650,6 +692,7 @@
                 if (stored.token && stored.expiry) {
                     const now = Date.now();
                     if (stored.expiry > now) {
+                        // Token valid – restore it
                         setAccessToken(stored.token);
                         tokenExpiry = stored.expiry;
                         currentDriveUserEmail = stored.email || '';
@@ -661,13 +704,16 @@
                         console.log('Drive token restored from DB');
                         setTimeout(() => performDailyBackupCheck(), 5000);
                     } else {
-                        console.log('Drive token expired – attempting silent refresh');
-                        if (tokenClient) {
-                            await refreshAccessToken();
-                        } else {
-                            throw new Error('tokenClient not ready');
-                        }
+                        // Token expired – do NOT auto-refresh; just mark as expired and update UI
+                        console.log('Drive token expired, awaiting user action');
+                        setSyncState('expired', 'Token expired – please reconnect');
+                        updateDriveUI(false); // show disconnected state
+                        // We do NOT call refreshAccessToken here to avoid popup
                     }
+                } else {
+                    // No token stored
+                    updateDriveUI(false);
+                    setSyncState('disconnected');
                 }
                 driveInitialized = true;
                 driveInitFailed = false;
@@ -675,6 +721,8 @@
             } catch (err) {
                 driveInitFailed = true;
                 console.warn('Google Drive init failed:', err);
+                updateDriveUI(false); // ensure UI is updated on failure
+                setSyncState('disconnected', err.message);
                 throw err;
             } finally {
                 initPromise = null;
@@ -682,6 +730,7 @@
         })();
         return initPromise;
     }
+    // ------------------ END FIXED initGoogleDriveModule ------------------
 
     function waitForGlobalObjects(timeout = 5000) {
         return new Promise((resolve, reject) => {
@@ -744,7 +793,7 @@
                                 console.warn('Could not fetch user email:', emailErr);
                                 if (emailErr.status === 401) {
                                     try {
-                                        await refreshAccessToken();
+                                        await silentRefreshAccessToken();
                                         email = await fetchDriveUserEmail();
                                     } catch (retryErr) {
                                         console.warn('Retry for email also failed:', retryErr);
@@ -803,6 +852,7 @@
         }
     }
 
+    // ------------------ FIXED: signInToGoogle – use 'select_account' to avoid re-consent ------------------
     function signInToGoogle() {
         console.log('signInToGoogle called');
         popupBlocked = false;
@@ -810,10 +860,10 @@
             if (!driveInitialized || driveInitFailed) {
                 initGoogleDriveModule(true)
                     .then(() => {
-                        console.log('Init successful, requesting token...');
+                        console.log('Init successful, requesting token with select_account...');
                         if (tokenClient) {
                             try {
-                                tokenClient.requestAccessToken({ prompt: 'consent' });
+                                tokenClient.requestAccessToken({ prompt: 'select_account' });
                             } catch (popupErr) {
                                 console.warn('Popup blocked or error:', popupErr);
                                 popupBlocked = true;
@@ -832,7 +882,7 @@
             } else {
                 if (tokenClient) {
                     try {
-                        tokenClient.requestAccessToken({ prompt: 'consent' });
+                        tokenClient.requestAccessToken({ prompt: 'select_account' });
                     } catch (popupErr) {
                         console.warn('Popup blocked or error:', popupErr);
                         popupBlocked = true;
@@ -849,6 +899,7 @@
             showToast('Error connecting to Google Drive: ' + err.message, 'error');
         }
     }
+    // ------------------ END FIXED signInToGoogle ------------------
 
     async function ensureBackupFolder(forceRefresh = false) {
         if (!accessToken) throw new Error('Not connected');
@@ -1324,7 +1375,7 @@
             case 'expired':
                 iconHtml = iconSvg('clock');
                 color = '#f59e0b';
-                tooltip = 'Token expired – refreshing';
+                tooltip = 'Token expired – please reconnect';
                 break;
             default:
                 iconHtml = iconSvg('cloud');
@@ -1443,7 +1494,7 @@
                 case 'syncing': dotColor = '#f59e0b'; label = 'Syncing...'; break;
                 case 'success': dotColor = '#10b981'; label = 'Connected & Synced'; break;
                 case 'error': dotColor = '#ef4444'; label = 'Sync Error'; break;
-                case 'expired': dotColor = '#f59e0b'; label = 'Token Expiring Soon'; break;
+                case 'expired': dotColor = '#f59e0b'; label = 'Token Expired – Reconnect'; break;
                 default: dotColor = '#6b7280'; label = 'Not Connected'; break;
             }
             statusBadge.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColor};margin-right:6px;"></span> ${label}`;
