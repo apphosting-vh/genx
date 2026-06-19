@@ -91,6 +91,7 @@
             min-height: 100vh;
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
         }
 
         /* ── Sidebar ── COMPACT VERSION ────────────────────────────────── */
@@ -1105,17 +1106,21 @@
                 }
             });
 
-            // ── Mobile menu toggle ───────────────────────────────────────
+            // ── Mobile: tap outside sidebar to close it ──────────────────
+            // NOTE: the menuToggle click → sidebar.classList.toggle('open')
+            // binding lives in app-core.js only. A duplicate toggle listener
+            // used to live here too; having both meant every tap toggled
+            // the class twice (open, then immediately closed again), so the
+            // sidebar appeared to "never open" on mobile. Keep only the
+            // outside-click-to-close behavior here.
             const menuToggle = document.getElementById('menuToggle');
             const sidebar = document.getElementById('sidebar');
             if (menuToggle && sidebar) {
-                menuToggle.addEventListener('click', function() {
-                    sidebar.classList.toggle('open');
-                });
                 document.addEventListener('click', function(e) {
                     if (window.innerWidth <= 768) {
-                        if (!sidebar.contains(e.target) && e.target !== menuToggle && !menuToggle.contains(e
-                            .target)) {
+                        if (sidebar.classList.contains('open') &&
+                            !sidebar.contains(e.target) &&
+                            !menuToggle.contains(e.target)) {
                             sidebar.classList.remove('open');
                         }
                     }
