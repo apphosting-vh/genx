@@ -682,10 +682,19 @@
         isRefreshing = true;
         return new Promise((resolve, reject) => {
             let resolved = false;
+            // originalCallback must be captured here (before the setTimeout closure) so the
+            // timeout handler can reference it via closure even though the const is declared below.
+            // JS hoists the binding to the top of the executor scope; it is initialised before
+            // the timer can fire because the timer is asynchronous.
+            let originalCallback; // declared early so the timeout closure below can see it
+
             const timeoutId = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
-                    tokenClient.callback = null;
+                    // CRITICAL FIX: restore the original callback so future sign-in / silent-refresh
+                    // attempts still work.  The previous code set tokenClient.callback = null here,
+                    // which permanently broke all subsequent GIS callbacks after the first timeout.
+                    if (tokenClient) tokenClient.callback = originalCallback;
                     isRefreshing = false;
                     if (prompt === 'none') {
                         reject(new Error('silent_refresh_timeout'));
@@ -695,7 +704,7 @@
                 }
             }, timeoutMs);
 
-            const originalCallback = tokenClient.callback;
+            originalCallback = tokenClient.callback;
             tokenClient.callback = (resp) => {
                 if (resolved) return;
                 clearTimeout(timeoutId);
@@ -703,7 +712,12 @@
                 isRefreshing = false;
                 resolved = true;
                 if (resp.error) {
-                    reject(new Error(resp.error));
+                    // 'immediate_failed' is GIS's way of saying it can't silently
+                    // refresh (no active session).  Preserve the error code so
+                    // callers can distinguish this from a hard auth failure.
+                    const err = new Error(resp.error);
+                    err.code = resp.error;
+                    reject(err);
                 } else {
                     setAccessToken(resp.access_token);
                     tokenExpiry = Date.now() + (resp.expires_in * 1000);
@@ -711,6 +725,10 @@
                         dbSetSetting('gdrive_expiry', tokenExpiry);
                         scheduleTokenRefresh(tokenExpiry);
                         setSyncState('idle');
+                        // Flush any syncs that were queued while the token was expired.
+                        // This is needed when the refresh is triggered by the proactive
+                        // timer (scheduleTokenRefresh) rather than by saveDriveToken.
+                        setTimeout(() => checkPendingSync(), 2000);
                         resolve(accessToken);
                     }).catch(err => {
                         reject(err);
@@ -743,9 +761,22 @@
                 setAccessToken(null);
                 try {
                     await silentRefreshAccessToken();
-                    return await fn();
+                    const result = await fn();
+                    // Success — flush any other pending syncs queued during the outage.
+                    setTimeout(() => checkPendingSync(), 2000);
+                    return result;
                 } catch (refreshErr) {
-                    setSyncState('disconnected', 'Token refresh failed');
+                    // 'immediate_failed' = GIS can't refresh without a prompt (session gone).
+                    // Use 'expired' (not 'disconnected') so the UI shows "reconnect" rather
+                    // than "not connected", which is a more accurate description.
+                    const isSessionGone = refreshErr.code === 'immediate_failed'
+                        || refreshErr.code === 'user_logged_out'
+                        || refreshErr.message === 'silent_refresh_timeout';
+                    const reason = isSessionGone
+                        ? 'Session expired – please reconnect'
+                        : 'Token refresh failed';
+                    setSyncState('expired', reason);
+                    updateDriveUI(false);
                     throw refreshErr;
                 }
             }
@@ -819,30 +850,62 @@
         if (refreshTimer) clearTimeout(refreshTimer);
         const now = Date.now();
         const timeUntilExpiry = expiry - now;
+
+        // Shared handler for when a proactive silent-refresh succeeds/fails
+        const onRefreshSuccess = () => {
+            setTimeout(() => checkPendingSync(), 2000);
+        };
+        const onRefreshFailure = (err) => {
+            console.warn('Silent token refresh failed:', err.message);
+            setSyncState('expired', 'Session expired – please reconnect');
+            setAccessToken(null);
+            updateDriveUI(false);
+        };
+
         if (timeUntilExpiry > 5 * 60 * 1000) {
+            // Token is healthy — schedule a proactive refresh 5 min before expiry
             const refreshIn = timeUntilExpiry - 5 * 60 * 1000;
             refreshTimer = setTimeout(async () => {
                 if (accessToken && tokenClient) {
                     try {
                         await silentRefreshAccessToken();
+                        onRefreshSuccess();
                     } catch (err) {
-                        console.warn('Silent token refresh failed:', err.message);
-                        setSyncState('expired', err.message);
-                        updateDriveUI(false);
+                        onRefreshFailure(err);
                     }
                 }
             }, refreshIn);
         } else if (timeUntilExpiry > 0) {
+            // Token expiring very soon — refresh immediately in the background
             if (accessToken && tokenClient) {
-                silentRefreshAccessToken().catch(err => {
-                    console.warn('Immediate silent refresh failed:', err.message);
-                    setSyncState('expired', err.message);
-                    updateDriveUI(false);
-                });
+                silentRefreshAccessToken()
+                    .then(onRefreshSuccess)
+                    .catch(onRefreshFailure);
             }
         } else {
-            setSyncState('expired', 'Token expired');
-            updateDriveUI(false);
+            // Token ALREADY expired.  Rather than giving up, attempt a silent recovery —
+            // GIS can often succeed via prompt:'none' if the browser still has an active
+            // Google session, even after the access-token itself has expired.
+            if (tokenClient) {
+                console.log('Token already expired — attempting silent recovery...');
+                setAccessToken(null); // Clear stale token so in-flight ops don't use it
+                silentRefreshAccessToken()
+                    .then(() => {
+                        console.log('Expired token recovered silently');
+                        setSyncState('idle');
+                        updateDriveUI(true);
+                        onRefreshSuccess();
+                    })
+                    .catch(err => {
+                        console.warn('Expired token silent recovery failed:', err.message);
+                        setSyncState('expired', 'Session expired – please reconnect');
+                        updateDriveUI(false);
+                    });
+            } else {
+                setSyncState('expired', 'Session expired – please reconnect');
+                setAccessToken(null);
+                updateDriveUI(false);
+            }
         }
     }
 
@@ -1285,22 +1348,34 @@
 
             let fileId = await getLatestBackupFileId(filename);
             let uploadUrl, method;
-            let metadata = {
-                name: filename,
-                parents: [folderId],
-            };
 
             if (fileId) {
                 uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
                 method = 'PATCH';
+                // IMPORTANT: Do NOT include 'parents' in PATCH metadata.
+                // Drive v3 rejects it with 403 ("File already has parents").
+                // Parents are immutable after creation — use addParents/removeParents
+                // query params if you ever need to move a file.
             } else {
                 uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
                 method = 'POST';
             }
 
-            const form = new FormData();
-            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            form.append('file', blob);
+            // Build the metadata blob once; the Blob is reusable across retries.
+            // 'parents' is only included on POST (new file), never on PATCH (update).
+            const metadataObj = method === 'POST'
+                ? { name: filename, parents: [folderId] }
+                : { name: filename };
+            const metadataBlob = new Blob([JSON.stringify(metadataObj)], { type: 'application/json' });
+
+            // Build a fresh FormData inside the fn so withTokenRetry can safely
+            // call fn() more than once (e.g. after a silent token refresh).
+            const buildForm = () => {
+                const f = new FormData();
+                f.append('metadata', metadataBlob);
+                f.append('file', blob);
+                return f;
+            };
 
             let response;
             let uploadSuccess = false;
@@ -1311,7 +1386,7 @@
                     const res = await fetch(uploadUrl, {
                         method: method,
                         headers: { Authorization: `Bearer ${accessToken}` },
-                        body: form,
+                        body: buildForm(),
                     });
                     if (!res.ok) {
                         const err = new Error('Upload failed: ' + res.status);
@@ -1322,21 +1397,22 @@
                 });
                 uploadSuccess = true;
             } catch (err) {
+                // Fallback: if PATCH still returns 403 for any reason, delete and recreate.
+                // This should be rare now that 'parents' is excluded from PATCH metadata.
                 if (err.status === 403 && method === 'PATCH') {
                     console.warn('403 on PATCH, trying to delete and recreate...');
                     if (fileId) {
                         await deleteDriveFile(fileId);
                     }
                     const newUploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-                    const newForm = new FormData();
-                    const newMetadata = {
-                        name: filename,
-                        parents: [folderId],
-                    };
-                    newForm.append('metadata', new Blob([JSON.stringify(newMetadata)], { type: 'application/json' }));
-                    newForm.append('file', blob);
-
+                    const newMetadataBlob = new Blob(
+                        [JSON.stringify({ name: filename, parents: [folderId] })],
+                        { type: 'application/json' }
+                    );
                     const retryRes = await withTokenRetry(async () => {
+                        const newForm = new FormData();
+                        newForm.append('metadata', newMetadataBlob);
+                        newForm.append('file', blob);
                         const res = await fetch(newUploadUrl, {
                             method: 'POST',
                             headers: { Authorization: `Bearer ${accessToken}` },
