@@ -18,9 +18,9 @@ const EXTERNAL_ASSETS = [
 
 // URLs that should never be cached (always network)
 const NEVER_CACHE = [
-    './app-version.json',
-    'https://accounts.google.com/gsi/client',
-    'https://apis.google.com/js/api.js'
+    'app-version.json',
+    'accounts.google.com/gsi/client',
+    'apis.google.com/js/api.js'
 ];
 
 // Install event – cache core assets, then external assets individually

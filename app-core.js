@@ -126,6 +126,7 @@
         if (sessionStorage.getItem('update_prompt_dismissed')) return;
         const container = document.getElementById('toastContainer');
         if (!container) return;
+        if (container.querySelector('.toast-update-version')) return;
         const existing = container.querySelector('.toast-update');
         if (existing) existing.remove();
 
@@ -139,7 +140,11 @@
         `;
         toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', (e) => {
             e.stopPropagation();
-            worker.postMessage('skipWaiting');
+            try {
+                worker.postMessage('skipWaiting');
+            } catch (err) {
+                console.error('Failed to send skipWaiting:', err);
+            }
             showToast('Updating app...', 'info');
             setTimeout(() => window.location.reload(), 1000);
         });
@@ -364,28 +369,35 @@
         const container = document.getElementById('toastContainer');
         if (!container) return;
         if (sessionStorage.getItem('version_toast_dismissed')) return;
-        const existing = container.querySelector('.toast-update');
+        if (container.querySelector('.toast-update')) return;
+        const existing = container.querySelector('.toast-update-version');
         if (existing) existing.remove();
 
         const toast = document.createElement('div');
-        toast.className = 'toast toast-info toast-update';
+        toast.className = 'toast toast-info toast-update-version';
         toast.style.cursor = 'pointer';
         toast.innerHTML = `
             <span>${iconSvg('refresh')} New version ${newVersion} available!</span>
             <button class="btn btn-sm" style="margin-left:10px; padding:2px 12px; background:#fff; color:#4f46e5; border:none; font-weight:700; cursor:pointer;">Update Now</button>
             <button class="btn btn-sm toast-dismiss" style="margin-left:6px; padding:2px 8px; background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.4); cursor:pointer;">✕</button>
         `;
-        toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', async (e) => {
+        toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', (e) => {
             e.stopPropagation();
-            await performAppUpdate();
+            performAppUpdate().catch(err => {
+                console.error('Update failed:', err);
+                showToast('Update failed: ' + err.message, 'error');
+            });
         });
         toast.querySelector('.toast-dismiss').addEventListener('click', (e) => {
             e.stopPropagation();
             sessionStorage.setItem('version_toast_dismissed', '1');
             toast.remove();
         });
-        toast.addEventListener('click', async () => {
-            await performAppUpdate();
+        toast.addEventListener('click', () => {
+            performAppUpdate().catch(err => {
+                console.error('Update failed:', err);
+                showToast('Update failed: ' + err.message, 'error');
+            });
         });
         container.appendChild(toast);
         setTimeout(() => {
@@ -396,12 +408,17 @@
     async function performAppUpdate() {
         try {
             showToast('Updating app...', 'info');
-            const registrations = await navigator.serviceWorker.getRegistrations();
-            for (const registration of registrations) {
-                await registration.unregister();
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                for (const registration of registrations) {
+                    await registration.unregister();
+                }
             }
-            const cacheNames = await caches.keys();
-            await Promise.all(cacheNames.map(name => caches.delete(name)));
+            if ('caches' in window) {
+                const cacheNames = await caches.keys();
+                const appCaches = cacheNames.filter(name => name.startsWith('genfin-'));
+                await Promise.all(appCaches.map(name => caches.delete(name)));
+            }
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
