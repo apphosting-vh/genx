@@ -2154,7 +2154,7 @@
             
             const renderTable = () => {
                 let html = `
-                    <div class="page-header"><h1 class="page-title">Invoices</h1><button class="btn btn-primary" id="addInvoiceBtn">${iconSvg('plus')} New Invoice</button></div>
+                    <div class="page-header"><h1 class="page-title">Invoices</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportInvoicesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addInvoiceBtn">${iconSvg('plus')} New Invoice</button></div></div>
                     <div class="card">
                         <div class="filter-bar" style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end;">
                             <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="invFromDate" value="${fromDate}" style="padding: 8px;"></div>
@@ -2193,6 +2193,7 @@
                 mainContent.innerHTML = html;
                 
                 document.getElementById('addInvoiceBtn')?.addEventListener('click', () => showInvoiceModal());
+                document.getElementById('exportInvoicesBtn')?.addEventListener('click', () => exportInvoicesToExcel(filteredInvoices, customerMap));
                 document.querySelectorAll('.view-invoice').forEach(btn => btn.addEventListener('click', () => showInvoiceViewModal(Number(btn.dataset.id))));
                 document.querySelectorAll('.edit-invoice').forEach(btn => btn.addEventListener('click', async () => {
                     const inv = await dbGetById('invoices', Number(btn.dataset.id));
@@ -2225,6 +2226,25 @@
             showToast('Failed to load invoices', 'error');
             console.error(err);
         }
+    }
+
+    async function exportInvoicesToExcel(invoices, customerMap) {
+        const headers = ['Invoice #', 'Date', 'Due Date', 'Customer', 'Subtotal', 'Discount', 'Total Tax', 'Grand Total', 'Status', 'Payment Terms', 'Notes'];
+        const rows = invoices.map(inv => [
+            inv.invoiceNumber || '',
+            inv.date || '',
+            inv.dueDate || '',
+            customerMap[inv.customerId] || '',
+            inv.subtotal || 0,
+            inv.discount || 0,
+            inv.totalTax || 0,
+            inv.grandTotal || 0,
+            inv.paymentStatus || '',
+            inv.paymentTerms || '',
+            inv.notes || ''
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_invoices_${dateStr}.xlsx`, 'Invoices');
     }
 
     async function updateInvoiceStatus(id, newStatus) {
@@ -2289,7 +2309,7 @@
                         <div style="max-height:70vh; overflow-y:auto;">${content}</div>
                         <div style="text-align:right; margin-top:16px;">
                             <button class="btn btn-secondary" id="editViewInvBtn">Edit</button>
-                            <button class="btn btn-primary" id="printViewInvBtn">Print / Export PDF</button>
+                            <button class="btn btn-export" id="printViewInvBtn">Print / Export PDF</button>
                             <button class="btn btn-outline" id="closeViewInvBtn2">Close</button>
                         </div>
                     </div>
@@ -2603,7 +2623,7 @@
             let filteredPOs = [...allPOs];
             
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><button class="btn btn-primary" id="addPOBtn">${iconSvg('plus')} New PO</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportPOsBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addPOBtn">${iconSvg('plus')} New PO</button></div></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="poFromDate" value="${fromDate}" style="padding:8px;"></div>
                     <div class="form-group" style="margin-bottom:0;"><label>To Date</label><input type="date" id="poToDate" value="${toDate}" style="padding:8px;"></div>
@@ -2621,6 +2641,7 @@
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addPOBtn')?.addEventListener('click', () => showPOModal());
+                document.getElementById('exportPOsBtn')?.addEventListener('click', () => exportPOsToExcel(filteredPOs, supplierMap));
                 document.querySelectorAll('.view-po').forEach(btn => btn.addEventListener('click', () => showPOViewModal(Number(btn.dataset.id))));
                 document.querySelectorAll('.edit-po').forEach(btn => btn.addEventListener('click', async () => { const po = await dbGetById('purchaseOrders', Number(btn.dataset.id)); if (po) showPOModal(po); }));
                 document.querySelectorAll('.export-po').forEach(btn => btn.addEventListener('click', () => exportPOPDF(Number(btn.dataset.id))));
@@ -2632,6 +2653,22 @@
             filteredPOs = [...allPOs];
             renderTable();
         } catch(err) { showToast('Failed to load purchase orders', 'error'); }
+    }
+
+    async function exportPOsToExcel(pos, supplierMap) {
+        const headers = ['PO #', 'Date', 'Supplier', 'Subtotal', 'Discount', 'Total Tax', 'Grand Total', 'Status'];
+        const rows = pos.map(po => [
+            po.poNumber || '',
+            po.date || '',
+            supplierMap[po.supplierId] || '',
+            po.subtotal || 0,
+            po.discount || 0,
+            po.totalTax || 0,
+            po.grandTotal || 0,
+            po.status || ''
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_pos_${dateStr}.xlsx`, 'PurchaseOrders');
     }
 
     async function updatePOStatus(id, newStatus) {
@@ -2673,7 +2710,7 @@
                 </div>
             `;
             const modalContainer = document.getElementById('modalContainer');
-            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">${iconSvg('close')}</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-primary" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-outline" id="closeViewPOBtn2">Close</button></div></div></div>`;
+            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">${iconSvg('close')}</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-export" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-outline" id="closeViewPOBtn2">Close</button></div></div></div>`;
             const close = () => { modalContainer.innerHTML = ''; };
             document.getElementById('closeViewPOModal').addEventListener('click', close);
             document.getElementById('closeViewPOBtn2').addEventListener('click', close);
@@ -2875,17 +2912,19 @@
             let fromDate = '', toDate = '';
             let filteredExpenses = [...allExpenses];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Expenses</h1><button class="btn btn-primary" id="addExpenseBtn">${iconSvg('plus')} Log Expense</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Expenses</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportExpensesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addExpenseBtn">${iconSvg('plus')} Log Expense</button></div></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="expFromDate" value="${fromDate}"></div>
                     <div class="form-group" style="margin-bottom:0;"><label>To Date</label><input type="date" id="expToDate" value="${toDate}"></div>
                     <button class="btn btn-primary" id="applyExpFilter">Apply Filter</button><button class="btn btn-secondary" id="clearExpFilter">Clear</button>
                 </div><div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Actions</th></tr></thead><tbody>`;
-                filteredExpenses.sort((a,b)=>b.id - a.id).forEach(e => { html += `<tr><td>${formatDate(e.date)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description)}</td><td>${formatCurrency(e.amount)}</td><td><button class="btn btn-danger btn-sm delete-expense" data-id="${e.id}">${iconSvg('trash')}</button></td></tr>`; });
+                filteredExpenses.sort((a,b)=>b.id - a.id).forEach(e => { html += `<tr><td>${formatDate(e.date)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description)}</td><td>${formatCurrency(e.amount)}</td><td><button class="btn btn-outline btn-sm edit-expense" data-id="${e.id}">Edit</button> <button class="btn btn-danger btn-sm delete-expense" data-id="${e.id}">${iconSvg('trash')}</button></td></tr>`; });
                 if (!filteredExpenses.length) html += `<tr><td colspan="5" class="empty-state">No expenses in date range.</td></tr>`;
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addExpenseBtn')?.addEventListener('click', () => showExpenseModal());
+                document.getElementById('exportExpensesBtn')?.addEventListener('click', () => exportExpensesToExcel(filteredExpenses));
+                document.querySelectorAll('.edit-expense').forEach(b => b.addEventListener('click', async () => { const e = await dbGetById('expenses', Number(b.dataset.id)); if (e) showExpenseModal(e); }));
                 document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); }));
                 document.getElementById('applyExpFilter')?.addEventListener('click', () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); });
                 document.getElementById('clearExpFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredExpenses = [...allExpenses]; renderTable(); });
@@ -2893,6 +2932,18 @@
             filteredExpenses = [...allExpenses];
             renderTable();
         } catch(err) { showToast('Failed to load expenses', 'error'); }
+    }
+
+    async function exportExpensesToExcel(expenses) {
+        const headers = ['Date', 'Category', 'Description', 'Amount'];
+        const rows = expenses.map(e => [
+            e.date || '',
+            e.category || '',
+            e.description || '',
+            e.amount || 0
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_expenses_${dateStr}.xlsx`, 'Expenses');
     }
 
     async function showExpenseModal(expData = null) {
@@ -2929,7 +2980,7 @@
             let searchTerm = '';
             let filteredCustomers = [...allCustomers];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Customers</h1><button class="btn btn-primary" id="addCustomerBtn">${iconSvg('plus')} Add Customer</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Customers</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportCustomersBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addCustomerBtn">${iconSvg('plus')} Add Customer</button></div></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name</label><input type="text" id="custSearch" value="${escapeHtml(searchTerm)}" placeholder="Type customer name..."></div>
                 <button class="btn btn-primary" id="applyCustSearch">Search</button><button class="btn btn-secondary" id="clearCustSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Name</th><th>GSTIN</th><th>State</th><th>Phone</th><th>Actions</th></tr></thead><tbody>`;
@@ -2938,6 +2989,7 @@
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addCustomerBtn')?.addEventListener('click', () => showCustomerModal());
+                document.getElementById('exportCustomersBtn')?.addEventListener('click', () => exportCustomersToExcel(filteredCustomers));
                 document.querySelectorAll('.edit-customer').forEach(b => b.addEventListener('click', async () => { const c = await dbGetById('customers', Number(b.dataset.id)); showCustomerModal(c); }));
                 document.querySelectorAll('.delete-customer').forEach(b => b.addEventListener('click', async () => { await dbDelete('customers', Number(b.dataset.id)); await renderCustomers(); }));
             };
@@ -2947,6 +2999,19 @@
             renderTable();
             setTimeout(() => { document.getElementById('applyCustSearch')?.addEventListener('click', apply); document.getElementById('clearCustSearch')?.addEventListener('click', clear); }, 0);
         } catch(err) { showToast('Failed to load customers', 'error'); }
+    }
+
+    async function exportCustomersToExcel(customers) {
+        const headers = ['Name', 'GSTIN', 'State', 'Phone', 'Address'];
+        const rows = customers.map(c => [
+            c.name || '',
+            c.gstin || '',
+            c.state || '',
+            c.phone || '',
+            c.address || ''
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_customers_${dateStr}.xlsx`, 'Customers');
     }
 
     async function showCustomerModal(custData = null) {
@@ -2987,7 +3052,7 @@
             let searchTerm = '';
             let filteredSuppliers = [...allSuppliers];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Suppliers</h1><button class="btn btn-primary" id="addSupplierBtn">${iconSvg('plus')} Add Supplier</button></div>
+                let html = `<div class="page-header"><h1 class="page-title">Suppliers</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportSuppliersBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addSupplierBtn">${iconSvg('plus')} Add Supplier</button></div></div>
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name</label><input type="text" id="supSearch" value="${escapeHtml(searchTerm)}" placeholder="Type supplier name..."></div>
                 <button class="btn btn-primary" id="applySupSearch">Search</button><button class="btn btn-secondary" id="clearSupSearch">Clear</button></div>
                 <div class="table-wrap"><table style="width:100%;"><thead><tr style="${TABLE_HEADER_STYLE}"><th>Name</th><th>GSTIN</th><th>State</th><th>Phone</th><th>Actions</th></tr></thead><tbody>`;
@@ -2996,6 +3061,7 @@
                 html += `</tbody></table></div></div>`;
                 mainContent.innerHTML = html;
                 document.getElementById('addSupplierBtn')?.addEventListener('click', () => showSupplierModal());
+                document.getElementById('exportSuppliersBtn')?.addEventListener('click', () => exportSuppliersToExcel(filteredSuppliers));
                 document.querySelectorAll('.edit-supplier').forEach(b => b.addEventListener('click', async () => { const s = await dbGetById('suppliers', Number(b.dataset.id)); showSupplierModal(s); }));
                 document.querySelectorAll('.delete-supplier').forEach(b => b.addEventListener('click', async () => { await dbDelete('suppliers', Number(b.dataset.id)); await renderSuppliers(); }));
             };
@@ -3005,6 +3071,19 @@
             renderTable();
             setTimeout(() => { document.getElementById('applySupSearch')?.addEventListener('click', apply); document.getElementById('clearSupSearch')?.addEventListener('click', clear); }, 0);
         } catch(err) { showToast('Failed to load suppliers', 'error'); }
+    }
+
+    async function exportSuppliersToExcel(suppliers) {
+        const headers = ['Name', 'GSTIN', 'State', 'Phone', 'Address'];
+        const rows = suppliers.map(s => [
+            s.name || '',
+            s.gstin || '',
+            s.state || '',
+            s.phone || '',
+            s.address || ''
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_suppliers_${dateStr}.xlsx`, 'Suppliers');
     }
 
     async function showSupplierModal(supData = null) {
@@ -3047,7 +3126,7 @@
             let searchTerm = '';
             let filteredProducts = [...allProducts];
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary" id="downloadTemplateBtn">${iconSvg('export')} Template</button><button class="btn btn-secondary" id="exportExcelBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-secondary" id="importExcelBtn">${iconSvg('import')} Import Excel</button><button class="btn btn-primary" id="addProductBtn">${iconSvg('plus')} Add Item</button></div></div>
+                let html = `<div class="page-header"><h1 class="page-title">Inventory</h1><div style="display:flex;gap:8px;flex-wrap:wrap;">                        <button class="btn btn-export" id="downloadTemplateBtn">${iconSvg('export')} Template</button><button class="btn btn-export" id="exportExcelBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-secondary" id="importExcelBtn">${iconSvg('import')} Import Excel</button><button class="btn btn-primary" id="addProductBtn">${iconSvg('plus')} Add Item</button></div></div>
                 <input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;align-items:flex-end;"><div class="form-group" style="margin-bottom:0;flex:1;"><label>Search by Name, SKU, Brand, Model</label><input type="text" id="prodSearch" value="${escapeHtml(searchTerm)}" placeholder="Type search term..."></div>
                 <button class="btn btn-primary" id="applyProdSearch">Search</button><button class="btn btn-secondary" id="clearProdSearch">Clear</button></div>
@@ -3218,6 +3297,25 @@
             const dateStr = new Date().toISOString().slice(0, 10);
             XLSX.writeFile(wb, `genfin_inventory_${dateStr}.xlsx`);
             showToast(`Exported ${products.length} items`, 'success');
+        } catch (err) {
+            console.error('Export error:', err);
+            showToast('Error exporting: ' + err.message, 'error');
+        }
+    }
+
+    // ---------- Common Excel Export Helper ----------
+    function exportToExcel(headers, dataRows, filename, sheetName = 'Data') {
+        try {
+            if (!dataRows.length) {
+                showToast('No data to export', 'info');
+                return;
+            }
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+            ws['!cols'] = headers.map((h, i) => ({ wch: Math.max(h.length, 12) }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            XLSX.writeFile(wb, filename);
+            showToast(`Exported ${dataRows.length} rows`, 'success');
         } catch (err) {
             console.error('Export error:', err);
             showToast('Error exporting: ' + err.message, 'error');
@@ -4293,8 +4391,8 @@
                     <div class="form-group" id="reportSubGroup" style="display:none;"><label>Detail</label><div id="reportSubContainer"></div></div>
                     <div class="form-group" style="align-self:end; display:flex; gap:8px;">
                         <button class="btn btn-primary" id="generateReportBtn">Generate</button>
-                        <button class="btn btn-secondary" id="exportCsvBtn">Export CSV</button>
-                        <button class="btn btn-secondary" id="exportFullDataBtn">Export All Data (CSV)</button>
+                        <button class="btn btn-export" id="exportCsvBtn">Export CSV</button>
+                        <button class="btn btn-export" id="exportFullDataBtn">Export All Data (CSV)</button>
                     </div>
                 </div>
             </div>
@@ -4657,7 +4755,7 @@
         let html = `
             <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
                 <h3>Service Records</h3>
-                <button class="btn btn-primary" id="addServiceBtn">${iconSvg('plus')} New Service Record</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportServicesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addServiceBtn">${iconSvg('plus')} New Service Record</button></div>
             </div>
             <div class="table-wrap">
                 <table>
@@ -4689,6 +4787,7 @@
         container.innerHTML = html;
 
         document.getElementById('addServiceBtn')?.addEventListener('click', () => showServiceModal());
+        document.getElementById('exportServicesBtn')?.addEventListener('click', () => exportServicesToExcel(services, customerMap));
         document.querySelectorAll('.edit-service').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const s = await dbGetById('serviceHistory', Number(btn.dataset.id));
@@ -4703,6 +4802,24 @@
                 }
             });
         });
+    }
+
+    async function exportServicesToExcel(services, customerMap) {
+        const headers = ['Service ID', 'Customer', 'Serial #', 'Service Date', 'Runtime (hrs)', 'Next Due', 'Problem Reported', 'Resolution', 'Parts Replaced', 'Cost'];
+        const rows = services.map(s => [
+            s.serviceId || '',
+            customerMap[s.customerId] || '',
+            s.generatorSerialNumber || '',
+            s.serviceDate || '',
+            s.runtimeHours || '',
+            s.nextServiceDueDate || '',
+            s.problemReported || '',
+            s.resolution || '',
+            s.partsReplaced || '',
+            s.serviceCost || 0
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_services_${dateStr}.xlsx`, 'ServiceHistory');
     }
 
     async function showServiceModal(serviceData = null) {
@@ -4783,7 +4900,7 @@
         let html = `
             <div style="display:flex; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
                 <h3>Warranty Records</h3>
-                <button class="btn btn-primary" id="addWarrantyBtn">${iconSvg('plus')} New Warranty</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportWarrantiesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addWarrantyBtn">${iconSvg('plus')} New Warranty</button></div>
             </div>
             <div class="table-wrap">
                 <table>
@@ -4815,6 +4932,7 @@
         container.innerHTML = html;
 
         document.getElementById('addWarrantyBtn')?.addEventListener('click', () => showWarrantyModal());
+        document.getElementById('exportWarrantiesBtn')?.addEventListener('click', () => exportWarrantiesToExcel(warranties, customerMap));
         document.querySelectorAll('.edit-warranty').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const w = await dbGetById('warranties', Number(btn.dataset.id));
@@ -4829,6 +4947,22 @@
                 }
             });
         });
+    }
+
+    async function exportWarrantiesToExcel(warranties, customerMap) {
+        const headers = ['Warranty ID', 'Customer', 'Serial #', 'Purchase Date', 'Start Date', 'End Date', 'Coverage Details', 'Claim History'];
+        const rows = warranties.map(w => [
+            w.warrantyId || '',
+            customerMap[w.customerId] || '',
+            w.generatorSerialNumber || '',
+            w.purchaseDate || '',
+            w.warrantyStartDate || '',
+            w.warrantyEndDate || '',
+            w.coverageDetails || '',
+            w.claimHistory || ''
+        ]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        exportToExcel(headers, rows, `genfin_warranties_${dateStr}.xlsx`, 'Warranties');
     }
 
     async function showWarrantyModal(warrantyData = null) {
@@ -4897,6 +5031,8 @@
     }
 
     // ---------- NEW: GST Summary Page ----------
+    let lastGstExportData = null;
+
     async function renderGSTSummary() {
         const now = new Date();
         const currentYear = now.getFullYear();
@@ -4924,7 +5060,7 @@
                     </div>
                     <div class="form-group" style="align-self:end; display:flex; gap:8px;">
                         <button class="btn btn-primary" id="generateGstBtn">Generate</button>
-                        <button class="btn btn-secondary" id="exportGstPdfBtn">Export PDF</button>
+                        <button class="btn btn-export" id="exportGstPdfBtn">Export PDF</button>
                     </div>
                 </div>
                 <div id="gstSummaryOutput"></div>
@@ -5091,7 +5227,10 @@
                         <div class="stat-card"><div class="stat-value">${formatCurrency(netIGST)}</div><div class="stat-label">Net IGST</div></div>
                     </div>
 
-                    <h3>Outward Supplies (Invoices)</h3>
+                    <div style="display:flex; align-items:center; gap:12px; margin:20px 0 8px;">
+                        <h3 style="margin:0;">Outward Supplies (Invoices)</h3>
+                        <button class="btn btn-export btn-sm" id="exportGstOutwardBtn">${iconSvg('export')} Export Excel</button>
+                    </div>
                     <div class="table-wrap">
                         <table>
                             <thead><tr style="${TABLE_HEADER_STYLE}">
@@ -5112,7 +5251,10 @@
                         </table>
                     </div>
 
-                    <h3>Inward Supplies (Purchase Orders)</h3>
+                    <div style="display:flex; align-items:center; gap:12px; margin:20px 0 8px;">
+                        <h3 style="margin:0;">Inward Supplies (Purchase Orders)</h3>
+                        <button class="btn btn-export btn-sm" id="exportGstInwardBtn">${iconSvg('export')} Export Excel</button>
+                    </div>
                     <div class="table-wrap">
                         <table>
                             <thead><tr style="${TABLE_HEADER_STYLE}">
@@ -5134,6 +5276,29 @@
                     </div>
                 `;
                 output.innerHTML = outputHtml;
+                output.querySelector('#exportGstOutwardBtn')?.addEventListener('click', exportGSTOutwardExcel);
+                output.querySelector('#exportGstInwardBtn')?.addEventListener('click', exportGSTInwardExcel);
+                // Store data for Excel export
+                lastGstExportData = {
+                    periodLabel,
+                    outward: invoices.map(inv => {
+                        const cust = customerMap[inv.customerId] || {};
+                        const items = inv.items || [];
+                        let invTaxable = 0, invCGST = 0, invSGST = 0, invIGST = 0;
+                        items.forEach(item => { invTaxable += item.taxable || 0; invCGST += item.cgstAmt || 0; invSGST += item.sgstAmt || 0; invIGST += item.igstAmt || 0; });
+                        return { invoiceNumber: inv.invoiceNumber, date: inv.date, customerName: cust.name || '', customerGstin: cust.gstin || '', items: items.map(it => it.description).join(', '), taxable: invTaxable, cgst: invCGST, sgst: invSGST, igst: invIGST, total: invTaxable + invCGST + invSGST + invIGST };
+                    }),
+                    inward: pos.map(po => {
+                        const supp = supplierMap[po.supplierId] || {};
+                        const items = po.items || [];
+                        let poTaxable = 0, poCGST = 0, poSGST = 0, poIGST = 0;
+                        items.forEach(item => { poTaxable += item.taxable || 0; poCGST += item.cgstAmt || 0; poSGST += item.sgstAmt || 0; poIGST += item.igstAmt || 0; });
+                        return { poNumber: po.poNumber, date: po.date, supplierName: supp.name || '', supplierGstin: supp.gstin || '', items: items.map(it => it.description).join(', '), taxable: poTaxable, cgst: poCGST, sgst: poSGST, igst: poIGST, total: poTaxable + poCGST + poSGST + poIGST };
+                    }),
+                    totalOutwardTaxable, totalOutwardCGST, totalOutwardSGST, totalOutwardIGST,
+                    totalInwardTaxable, totalInwardCGST, totalInwardSGST, totalInwardIGST,
+                    netCGST, netSGST, netIGST, netTotalTax
+                };
                 // Store data for PDF export
                 output.dataset.periodLabel = periodLabel;
                 output.dataset.outwardRows = outwardRows;
@@ -5251,6 +5416,60 @@
         const win = window.open('', '_blank');
         win.document.write(printHtml);
         win.document.close();
+    }
+
+    function exportGSTOutwardExcel() {
+        if (!lastGstExportData) {
+            toast('Generate the GST summary first.', 'warning');
+            return;
+        }
+        const d = lastGstExportData;
+        const ws = XLSX.utils.json_to_sheet(d.outward.map(r => ({
+            'Invoice #': r.invoiceNumber,
+            Date: r.date,
+            Customer: r.customerName,
+            GSTIN: r.customerGstin,
+            Items: r.items,
+            Taxable: r.taxable,
+            CGST: r.cgst,
+            SGST: r.sgst,
+            IGST: r.igst,
+            Total: r.total
+        })));
+        XLSX.utils.sheet_add_aoa(ws, [['OUTWARD SUPPLIES (INVOICES)']], { origin: -1 });
+        XLSX.utils.sheet_add_aoa(ws, [[
+            'Invoice #','Date','Customer','GSTIN','Items','Taxable','CGST','SGST','IGST','Total'
+        ]], { origin: 'A2' });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Outward');
+        XLSX.writeFile(wb, `GST_Outward_${d.periodLabel.replace(/[/\s,]/g, '_')}.xlsx`);
+    }
+
+    function exportGSTInwardExcel() {
+        if (!lastGstExportData) {
+            toast('Generate the GST summary first.', 'warning');
+            return;
+        }
+        const d = lastGstExportData;
+        const ws = XLSX.utils.json_to_sheet(d.inward.map(r => ({
+            'PO #': r.poNumber,
+            Date: r.date,
+            Supplier: r.supplierName,
+            GSTIN: r.supplierGstin,
+            Items: r.items,
+            Taxable: r.taxable,
+            CGST: r.cgst,
+            SGST: r.sgst,
+            IGST: r.igst,
+            Total: r.total
+        })));
+        XLSX.utils.sheet_add_aoa(ws, [['INWARD SUPPLIES (PURCHASE ORDERS)']], { origin: -1 });
+        XLSX.utils.sheet_add_aoa(ws, [[
+            'PO #','Date','Supplier','GSTIN','Items','Taxable','CGST','SGST','IGST','Total'
+        ]], { origin: 'A2' });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Inward');
+        XLSX.writeFile(wb, `GST_Inward_${d.periodLabel.replace(/[/\s,]/g, '_')}.xlsx`);
     }
 
     // ---------- NEW: Notepad Module ----------
