@@ -140,6 +140,8 @@
         toast.querySelector('button:not(.toast-dismiss)').addEventListener('click', (e) => {
             e.stopPropagation();
             worker.postMessage('skipWaiting');
+            showToast('Updating app...', 'info');
+            setTimeout(() => window.location.reload(), 1000);
         });
         toast.querySelector('.toast-dismiss').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -147,6 +149,9 @@
             toast.remove();
         });
         container.appendChild(toast);
+        setTimeout(() => {
+            if (toast.parentNode) toast.remove();
+        }, 60000);
     }
 
     // ---------- IndexedDB functions ----------
