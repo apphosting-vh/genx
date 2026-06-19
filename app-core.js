@@ -98,6 +98,9 @@
 
     let _suppressAutoBackup = false;
 
+    // ---------- Sample Data ----------
+    const SAMPLE_DATA = {"version":2,"timestamp":"2026-06-16T13:48:34.290Z","profile":{"businessName":"Mahima Electrotek","gstin":"29ABCDE1234F1Z5","address":"Hulimane","city":"Siddapur","state":"Karnataka","pincode":"581340","email":"sales@powertech.in","phone":"9876543210","invoicePrefix":"MH/26-27/","bankName":"State Bank of India","accountNo":"123456789876","ifsc":"SBIN100032","upi":"mh@sbi.in"},"customers":[{"id":1,"name":"ABC Industries Pvt Ltd","contactPerson":"Manager 1","phone":"9876500001","email":"contact1@example.com","gstin":"29CUS00000001Z5","state":"Karnataka","address":"Mysuru, Karnataka"},{"id":2,"name":"Green Farms Ltd","contactPerson":"Manager 2","phone":"9876500002","email":"contact2@example.com","gstin":"29CUS00000002Z5","state":"Karnataka","address":"Mysuru, Karnataka"},{"id":3,"name":"Mysore Hospital","contactPerson":"Manager 3","phone":"9876500003","email":"contact3@example.com","gstin":"29CUS00000003Z5","state":"Karnataka","address":"Mysuru, Karnataka"},{"id":4,"name":"TechNova Solutions","contactPerson":"Manager 4","phone":"9876500004","email":"contact4@example.com","gstin":"29CUS00000004Z5","state":"Tamil Nadu","address":"Chennai, Tamil Nadu"},{"id":5,"name":"Sunrise Apartments","contactPerson":"Manager 5","phone":"9876500005","email":"contact5@example.com","gstin":"29CUS00000005Z5","state":"Kerala","address":"Kochi, Kerala"},{"id":6,"name":"Karnataka Textiles","contactPerson":"Manager 6","phone":"9876500006","email":"contact6@example.com","gstin":"29CUS00000006Z5","state":"Karnataka","address":"Mandya, Karnataka"},{"id":7,"name":"Elite Resorts","contactPerson":"Manager 7","phone":"9876500007","email":"contact7@example.com","gstin":"29CUS00000007Z5","state":"Goa","address":"Panaji, Goa"},{"id":8,"name":"BlueSky Developers","contactPerson":"Manager 8","phone":"9876500008","email":"contact8@example.com","gstin":"29CUS00000008Z5","state":"Telangana","address":"Hyderabad, Telangana"},{"id":9,"name":"AgroFresh Foods","contactPerson":"Manager 9","phone":"9876500009","email":"contact9@example.com","gstin":"29CUS00000009Z5","state":"Andhra Pradesh","address":"Vijayawada, Andhra Pradesh"},{"id":10,"name":"Metro Mall","contactPerson":"Manager 10","phone":"9876500010","email":"contact10@example.com","gstin":"29CUS00000010Z5","state":"Maharashtra","address":"Mumbai, Maharashtra"}],"suppliers":[{"id":1,"name":"Kirloskar Parts Depot","phone":"9988776601","email":"sales1@supplier.com","gstin":"29SUP00000001Z5","state":"Karnataka","address":"Bengaluru, Karnataka"},{"id":2,"name":"Power Solutions India","phone":"9988776602","email":"sales2@supplier.com","gstin":"29SUP00000002Z5","state":"Tamil Nadu","address":"Chennai, Tamil Nadu"},{"id":3,"name":"Cummins India","phone":"9988776603","email":"sales3@supplier.com","gstin":"29SUP00000003Z5","state":"Maharashtra","address":"Pune, Maharashtra"},{"id":4,"name":"DieselPro Supplies","phone":"9988776604","email":"sales4@supplier.com","gstin":"29SUP00000004Z5","state":"Telangana","address":"Hyderabad, Telangana"},{"id":5,"name":"Bharat Batteries","phone":"9988776605","email":"sales5@supplier.com","gstin":"29SUP00000005Z5","state":"Kerala","address":"Kochi, Kerala"},{"id":6,"name":"Turbo Engines Ltd","phone":"9988776606","email":"sales6@supplier.com","gstin":"29SUP00000006Z5","state":"Andhra Pradesh","address":"Vijayawada, Andhra Pradesh"},{"id":7,"name":"South India Lubricants","phone":"9988776607","email":"sales7@supplier.com","gstin":"29SUP00000007Z5","state":"Karnataka","address":"Hubballi, Karnataka"},{"id":8,"name":"Generator Components India","phone":"9988776608","email":"sales8@supplier.com","gstin":"29SUP00000008Z5","state":"Tamil Nadu","address":"Coimbatore, Tamil Nadu"},{"id":9,"name":"Precision Electricals","phone":"9988776609","email":"sales9@supplier.com","gstin":"29SUP00000009Z5","state":"Goa","address":"Panaji, Goa"},{"id":10,"name":"Industrial Tools Hub","phone":"9988776610","email":"sales10@supplier.com","gstin":"29SUP00000010Z5","state":"Maharashtra","address":"Mumbai, Maharashtra"}],"products":[{"type":"Generator","sku":"","name":"15 KVA Diesel Generator","brand":"","modelNumber":"","category":"Generator","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":27200,"sellingPrice":32000,"gstRate":18,"supplierId":1,"stockQuantity":19,"reorderLevel":5,"status":"In Stock","id":1},{"type":"Generator","sku":"","name":"25 KVA Diesel Generator","brand":"","modelNumber":"","category":"Generator","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":40800,"sellingPrice":48000,"gstRate":18,"supplierId":2,"stockQuantity":18,"reorderLevel":5,"status":"In Stock","id":2},{"type":"Generator","sku":"","name":"62.5 KVA Silent DG Sets","brand":"","modelNumber":"","category":"Generator","fuelType":"Diesel","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":75650,"sellingPrice":89000,"gstRate":18,"supplierId":3,"stockQuantity":17,"reorderLevel":5,"status":"In Stock","id":3},{"type":"Service","sku":"","name":"Annual Maintenance Contract","brand":"","modelNumber":"","category":"Service","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":15300,"sellingPrice":18000,"gstRate":18,"supplierId":4,"stockQuantity":16,"reorderLevel":5,"status":"In Stock","id":4},{"type":"Spare Part","sku":"","name":"Oil Filter Kit","brand":"","modelNumber":"","category":"Spare","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":2125,"sellingPrice":2500,"gstRate":18,"supplierId":5,"stockQuantity":15,"reorderLevel":5,"status":"In Stock","id":5},{"type":"Spare Part","sku":"","name":"Fuel Filter","brand":"","modelNumber":"","category":"Spare","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":2720,"sellingPrice":3200,"gstRate":18,"supplierId":6,"stockQuantity":14,"reorderLevel":5,"status":"In Stock","id":6},{"type":"Spare Part","sku":"","name":"Engine Oil 20L","brand":"","modelNumber":"","category":"Spare","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":5780,"sellingPrice":6800,"gstRate":18,"supplierId":7,"stockQuantity":13,"reorderLevel":5,"status":"In Stock","id":7},{"type":"Spare Part","sku":"","name":"Battery 12V","brand":"","modelNumber":"","category":"Spare","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":9775,"sellingPrice":11500,"gstRate":18,"supplierId":8,"stockQuantity":12,"reorderLevel":5,"status":"In Stock","id":8},{"type":"Spare Part","sku":"","name":"Starter Motor","brand":"","modelNumber":"","category":"Spare","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":15725,"sellingPrice":18500,"gstRate":18,"supplierId":9,"stockQuantity":11,"reorderLevel":5,"status":"In Stock","id":9},{"type":"Service","sku":"","name":"Control Panel Service","brand":"","modelNumber":"","category":"Service","fuelType":"","capacityKva":0,"outputVoltage":"","phase":"","frequency":"","engineModel":"","alternatorModel":"","serialNumber":"","manufacturingYear":null,"warrantyPeriod":null,"purchasePrice":5525,"sellingPrice":6500,"gstRate":18,"supplierId":10,"stockQuantity":10,"reorderLevel":5,"status":"In Stock","id":10}],"invoices":[{"invoiceNumber":"PT/26-27/001","date":"2026-02-05","customerId":1,"items":[{"productId":"1","description":"15 KVA Diesel Generator","hsn":"","qty":1,"rate":82000,"selectedGstRate":0,"taxable":82000,"cgstRate":0,"sgstRate":0,"igstRate":0,"cgstAmt":0,"sgstAmt":0,"igstAmt":0,"total":82000}],"subtotal":82000,"discount":0,"totalTax":0,"grandTotal":82000,"paymentTerms":"Immediate","dueDate":"2026-02-20","paymentStatus":"Paid","notes":"","stateOfSupply":"Karnataka","isIntraState":true,"id":1},{"invoiceNumber":"PT/26-27/002","date":"2026-03-05","customerId":2,"items":[{"productId":"2","description":"25 KVA Diesel Generator","hsn":"","qty":1,"rate":48000,"selectedGstRate":18,"taxable":48000,"cgstRate":9,"sgstRate":9,"igstRate":0,"cgstAmt":4320,"sgstAmt":4320,"igstAmt":0,"total":56640}],"subtotal":48000,"discount":0,"totalTax":8640,"grandTotal":56640,"paymentTerms":"Immediate","dueDate":"2026-03-20","paymentStatus":"Paid","notes":"","stateOfSupply":"Karnataka","isIntraState":true,"id":2},{"invoiceNumber":"PT/26-27/003","date":"2026-04-05","customerId":3,"items":[{"productId":"3","description":"62.5 KVA Silent DG Sets","hsn":"","qty":1,"rate":8900,"selectedGstRate":18,"taxable":8900,"cgstRate":9,"sgstRate":9,"igstRate":0,"cgstAmt":801,"sgstAmt":801,"igstAmt":0,"total":10502}],"subtotal":8900,"discount":0,"totalTax":1602,"grandTotal":10502,"paymentTerms":"Immediate","dueDate":"2026-04-20","paymentStatus":"Paid","notes":"","stateOfSupply":"Karnataka","isIntraState":true,"id":3},{"id":4,"invoiceNumber":"PT/26-27/004","date":"2026-05-05","dueDate":"2026-05-20","customerId":4,"stateOfSupply":"Tamil Nadu","discount":0,"subtotal":18000,"totalTax":3240,"grandTotal":21240,"paymentStatus":"Paid","items":[{"productId":4,"description":"Annual Maintenance Contract","hsn":"85021300","qty":1,"rate":18000,"selectedGstRate":18,"taxable":18000,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":3240,"total":21240}]},{"id":5,"invoiceNumber":"PT/26-27/005","date":"2026-06-05","dueDate":"2026-06-20","customerId":5,"stateOfSupply":"Kerala","discount":0,"subtotal":2500,"totalTax":450,"grandTotal":2950,"paymentStatus":"Paid","items":[{"productId":5,"description":"Oil Filter Kit","hsn":"85021300","qty":1,"rate":2500,"selectedGstRate":18,"taxable":2500,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":450,"total":2950}]},{"id":6,"invoiceNumber":"PT/26-27/006","date":"2026-01-05","dueDate":"2026-01-20","customerId":6,"stateOfSupply":"Karnataka","discount":0,"subtotal":3200,"totalTax":576,"grandTotal":3776,"paymentStatus":"Paid","items":[{"productId":6,"description":"Fuel Filter","hsn":"85021300","qty":1,"rate":3200,"selectedGstRate":18,"taxable":3200,"cgstRate":9,"sgstRate":9,"igstRate":0,"cgstAmt":288,"sgstAmt":288,"igstAmt":0,"total":3776}]},{"invoiceNumber":"PT/26-27/007","date":"2026-02-05","customerId":7,"items":[{"productId":"7","description":"Engine Oil 20L","hsn":"","qty":1,"rate":68000,"selectedGstRate":18,"taxable":68000,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":12240,"total":80240}],"subtotal":68000,"discount":0,"totalTax":12240,"grandTotal":80240,"paymentTerms":"Immediate","dueDate":"2026-02-20","paymentStatus":"Unpaid","notes":"","stateOfSupply":"Goa","isIntraState":false,"id":7},{"id":8,"invoiceNumber":"PT/26-27/008","date":"2026-03-05","dueDate":"2026-03-20","customerId":8,"stateOfSupply":"Telangana","discount":0,"subtotal":11500,"totalTax":2070,"grandTotal":13570,"paymentStatus":"Unpaid","items":[{"productId":8,"description":"Battery 12V","hsn":"85021300","qty":1,"rate":11500,"selectedGstRate":18,"taxable":11500,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":2070,"total":13570}]},{"id":9,"invoiceNumber":"PT/26-27/009","date":"2026-04-05","dueDate":"2026-04-20","customerId":9,"stateOfSupply":"Andhra Pradesh","discount":0,"subtotal":18500,"totalTax":3330,"grandTotal":21830,"paymentStatus":"Unpaid","items":[{"productId":9,"description":"Starter Motor","hsn":"85021300","qty":1,"rate":18500,"selectedGstRate":18,"taxable":18500,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":3330,"total":21830}]},{"invoiceNumber":"PT/26-27/010","date":"2026-05-05","customerId":10,"items":[{"productId":"10","description":"Control Panel Service","hsn":"","qty":1,"rate":6500,"selectedGstRate":0,"taxable":6500,"cgstRate":0,"sgstRate":0,"igstRate":0,"cgstAmt":0,"sgstAmt":0,"igstAmt":0,"total":6500}],"subtotal":6500,"discount":0,"totalTax":0,"grandTotal":6500,"paymentTerms":"Net 60","dueDate":"2026-07-04","paymentStatus":"Overdue","notes":"","stateOfSupply":"Maharashtra","isIntraState":false,"id":10}],"purchaseOrders":[{"poNumber":"PO-001","date":"2026-02-01","supplierId":1,"items":[{"productId":"1","description":"15 KVA Diesel Generator","hsn":"","qty":1,"rate":27200,"selectedGstRate":18,"taxable":27200,"cgstRate":9,"sgstRate":9,"igstRate":0,"cgstAmt":2448,"sgstAmt":2448,"igstAmt":0,"total":32096}],"subtotal":27200,"discount":0,"totalTax":4896,"grandTotal":32096,"status":"Received","id":1},{"poNumber":"PO-002","date":"2026-03-01","supplierId":2,"items":[{"productId":"2","description":"25 KVA Diesel Generator","hsn":"","qty":1,"rate":40800,"selectedGstRate":18,"taxable":40800,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":7344,"total":48144}],"subtotal":40800,"discount":0,"totalTax":7344,"grandTotal":48144,"status":"Received","id":2},{"poNumber":"PO-003","date":"2026-04-01","supplierId":3,"items":[{"productId":"3","description":"62.5 KVA Silent DG Sets","hsn":"","qty":1,"rate":75650,"selectedGstRate":18,"taxable":75650,"cgstRate":0,"sgstRate":0,"igstRate":18,"cgstAmt":0,"sgstAmt":0,"igstAmt":13617,"total":89267}],"subtotal":75650,"discount":0,"totalTax":13617,"grandTotal":89267,"status":"Received","id":3},{"id":4,"poNumber":"PO-004","date":"2026-05-01","supplierId":4,"stateOfSupply":"Telangana","discount":0,"subtotal":15300,"totalTax":2754,"grandTotal":18054,"status":"Received","items":[{"productId":4,"description":"Annual Maintenance Contract","hsn":"85021300","qty":1,"rate":15300,"selectedGstRate":18,"taxable":15300,"cgstAmt":0,"sgstAmt":0,"igstAmt":2754,"total":18054}]},{"poNumber":"PO-005","date":"2026-06-01","supplierId":5,"items":[{"productId":"5","description":"Oil Filter Kit","hsn":"","qty":1,"rate":2125,"selectedGstRate":12,"taxable":2125,"cgstRate":0,"sgstRate":0,"igstRate":12,"cgstAmt":0,"sgstAmt":0,"igstAmt":255,"total":2380}],"subtotal":2125,"discount":0,"totalTax":255,"grandTotal":2380,"status":"Received","id":5},{"id":6,"poNumber":"PO-006","date":"2026-01-01","supplierId":6,"stateOfSupply":"Andhra Pradesh","discount":0,"subtotal":2720,"totalTax":489.6,"grandTotal":3209.6,"status":"Received","items":[{"productId":6,"description":"Fuel Filter","hsn":"85021300","qty":1,"rate":2720,"selectedGstRate":18,"taxable":2720,"cgstAmt":0,"sgstAmt":0,"igstAmt":489.6,"total":3209.6}]},{"id":7,"poNumber":"PO-007","date":"2026-02-01","supplierId":7,"stateOfSupply":"Karnataka","discount":0,"subtotal":5780,"totalTax":1040.4,"grandTotal":6820.4,"status":"Cancelled","items":[{"productId":7,"description":"Engine Oil 20L","hsn":"85021300","qty":1,"rate":5780,"selectedGstRate":18,"taxable":5780,"cgstAmt":520.2,"sgstAmt":520.2,"igstAmt":0,"total":6820.4}]},{"id":8,"poNumber":"PO-008","date":"2026-03-01","supplierId":8,"stateOfSupply":"Tamil Nadu","discount":0,"subtotal":9775,"totalTax":1759.5,"grandTotal":11534.5,"status":"Pending","items":[{"productId":8,"description":"Battery 12V","hsn":"85021300","qty":1,"rate":9775,"selectedGstRate":18,"taxable":9775,"cgstAmt":0,"sgstAmt":0,"igstAmt":1759.5,"total":11534.5}]},{"id":9,"poNumber":"PO-009","date":"2026-04-01","supplierId":9,"stateOfSupply":"Goa","discount":0,"subtotal":15725,"totalTax":2830.5,"grandTotal":18555.5,"status":"Cancelled","items":[{"productId":9,"description":"Starter Motor","hsn":"85021300","qty":1,"rate":15725,"selectedGstRate":18,"taxable":15725,"cgstAmt":0,"sgstAmt":0,"igstAmt":2830.5,"total":18555.5}]},{"id":10,"poNumber":"PO-010","date":"2026-05-01","supplierId":10,"stateOfSupply":"Maharashtra","discount":0,"subtotal":5525,"totalTax":994.5,"grandTotal":6519.5,"status":"Cancelled","items":[{"productId":10,"description":"Control Panel Service","hsn":"85021300","qty":1,"rate":5525,"selectedGstRate":18,"taxable":5525,"cgstAmt":0,"sgstAmt":0,"igstAmt":994.5,"total":6519.5}]}],"expenses":[{"id":1,"date":"2026-06-01","category":"Fuel","description":"Fuel expense","amount":1200},{"id":2,"date":"2026-06-02","category":"Rent","description":"Rent expense","amount":2400},{"id":3,"date":"2026-06-03","category":"Electricity","description":"Electricity expense","amount":3600},{"id":4,"date":"2026-06-04","category":"Internet","description":"Internet expense","amount":4800},{"id":5,"date":"2026-06-05","category":"Office","description":"Office expense","amount":6000},{"id":6,"date":"2026-06-06","category":"Travel","description":"Travel expense","amount":7200},{"id":7,"date":"2026-06-07","category":"Vehicle","description":"Vehicle expense","amount":8400},{"id":8,"date":"2026-06-08","category":"Marketing","description":"Marketing expense","amount":9600},{"id":9,"date":"2026-06-09","category":"Tools","description":"Tools expense","amount":10800},{"id":10,"date":"2026-06-10","category":"Misc","description":"Misc expense","amount":12000}],"serviceHistory":[{"id":1,"serviceId":"SRV-0001","customerId":1,"generatorSerialNumber":"GEN-2026-001","serviceDate":"2026-06-01","runtimeHours":100,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-01","serviceCost":3000},{"id":2,"serviceId":"SRV-0002","customerId":2,"generatorSerialNumber":"GEN-2026-002","serviceDate":"2026-06-02","runtimeHours":200,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-02","serviceCost":3500},{"id":3,"serviceId":"SRV-0003","customerId":3,"generatorSerialNumber":"GEN-2026-003","serviceDate":"2026-06-03","runtimeHours":300,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-03","serviceCost":4000},{"id":4,"serviceId":"SRV-0004","customerId":4,"generatorSerialNumber":"GEN-2026-004","serviceDate":"2026-06-04","runtimeHours":400,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-04","serviceCost":4500},{"id":5,"serviceId":"SRV-0005","customerId":5,"generatorSerialNumber":"GEN-2026-005","serviceDate":"2026-06-05","runtimeHours":500,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-05","serviceCost":5000},{"id":6,"serviceId":"SRV-0006","customerId":6,"generatorSerialNumber":"GEN-2026-006","serviceDate":"2026-06-06","runtimeHours":600,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-06","serviceCost":5500},{"id":7,"serviceId":"SRV-0007","customerId":7,"generatorSerialNumber":"GEN-2026-007","serviceDate":"2026-06-07","runtimeHours":700,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-07","serviceCost":6000},{"id":8,"serviceId":"SRV-0008","customerId":8,"generatorSerialNumber":"GEN-2026-008","serviceDate":"2026-06-08","runtimeHours":800,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-08","serviceCost":6500},{"id":9,"serviceId":"SRV-0009","customerId":9,"generatorSerialNumber":"GEN-2026-009","serviceDate":"2026-06-09","runtimeHours":900,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-09","serviceCost":7000},{"id":10,"serviceId":"SRV-0010","customerId":10,"generatorSerialNumber":"GEN-2026-010","serviceDate":"2026-06-10","runtimeHours":1000,"problemReported":"Routine maintenance","resolution":"Resolved","partsReplaced":"Standard parts","nextServiceDueDate":"2026-09-10","serviceCost":7500}],"warranties":[{"id":1,"warrantyId":"WAR-0001","customerId":1,"generatorSerialNumber":"GEN-2026-001","productName":"15 KVA Diesel Generator","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":2,"warrantyId":"WAR-0002","customerId":2,"generatorSerialNumber":"GEN-2026-002","productName":"25 KVA Diesel Generator","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":3,"warrantyId":"WAR-0003","customerId":3,"generatorSerialNumber":"GEN-2026-003","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":4,"warrantyId":"WAR-0004","customerId":4,"generatorSerialNumber":"GEN-2026-004","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":5,"warrantyId":"WAR-0005","customerId":5,"generatorSerialNumber":"GEN-2026-005","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":6,"warrantyId":"WAR-0006","customerId":6,"generatorSerialNumber":"GEN-2026-006","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":7,"warrantyId":"WAR-0007","customerId":7,"generatorSerialNumber":"GEN-2026-007","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Active","notes":"Manufacturer warranty"},{"id":8,"warrantyId":"WAR-0008","customerId":8,"generatorSerialNumber":"GEN-2026-008","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Expiring Soon","notes":"Manufacturer warranty"},{"id":9,"warrantyId":"WAR-0009","customerId":9,"generatorSerialNumber":"GEN-2026-009","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Expiring Soon","notes":"Manufacturer warranty"},{"id":10,"warrantyId":"WAR-0010","customerId":10,"generatorSerialNumber":"GEN-2026-010","productName":"62.5 KVA Silent DG Set","purchaseDate":"2026-01-01","warrantyStartDate":"2026-01-01","warrantyEndDate":"2028-01-01","status":"Expired","notes":"Manufacturer warranty"}],"settings":[{"key":"gdrive_email","value":""},{"key":"gdrive_expiry","value":1781620192047},{"key":"gdrive_token","value":"ya29.a0AT3oNZ9oCgbL7LJ_LUpYldL0vTXKgHEvoKLngZlrZOa7M9AoHEX7ZlaogTupDnyFVaMIfyin3IQt6MJ_OJ7xZyCe164ywu0E1NTR3YaV5hFMQTJqKVnitW_9-t7SUiT_jUx4fYejI1zjFtRgoFASGCSivWBc2BpPHiNw8T9i3n7I6W5tn6_Z2nl6bhgElNSDNUFamj8aCgYKAW8SARESFQHGX2MiMVtqkAs2jbfq5YQ-UgsFBQ0206"}]};
+
     // ---------- Service Worker Registration ----------
     function registerServiceWorker() {
         if (!('serviceWorker' in navigator)) return;
@@ -1506,7 +1509,7 @@
             throw new Error('Invalid backup file format');
         }
         const confirmMsg = '⚠️ WARNING: This will replace ALL existing data.\n\nAre you absolutely sure?';
-        if (!confirm(confirmMsg)) return false;
+        if (!await showConfirmModal(confirmMsg)) return false;
 
         showToast('Restoring backup, please wait...', 'info');
         _suppressAutoBackup = true;
@@ -1555,6 +1558,58 @@
         }
     }
 
+    function showConfirmModal(message) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:440px;">
+                    <h3 style="margin-bottom:16px;">Confirm</h3>
+                    <p style="margin-bottom:24px; color:#6b7280; line-height:1.5;">${message}</p>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="btn btn-secondary" id="confirmNoBtn">Cancel</button>
+                        <button class="btn btn-danger" id="confirmYesBtn">Confirm</button>
+                    </div>
+                </div>
+            `;
+            const container = document.getElementById('modalContainer');
+            container.innerHTML = '';
+            container.appendChild(overlay);
+            const close = result => { container.innerHTML = ''; resolve(result); };
+            overlay.querySelector('#confirmYesBtn').addEventListener('click', () => close(true));
+            overlay.querySelector('#confirmNoBtn').addEventListener('click', () => close(false));
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
+        });
+    }
+
+    function showPromptModal(message, defaultValue = '') {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:440px;">
+                    <h3 style="margin-bottom:16px;">Confirm</h3>
+                    <p style="margin-bottom:12px; color:#6b7280;">${message}</p>
+                    <input type="text" id="promptInput" value="${defaultValue}" style="width:100%; margin-bottom:16px; padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:1rem; box-sizing:border-box;">
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="btn btn-secondary" id="promptCancelBtn">Cancel</button>
+                        <button class="btn btn-primary" id="promptOkBtn">OK</button>
+                    </div>
+                </div>
+            `;
+            const container = document.getElementById('modalContainer');
+            container.innerHTML = '';
+            container.appendChild(overlay);
+            const close = result => { container.innerHTML = ''; resolve(result); };
+            const input = overlay.querySelector('#promptInput');
+            overlay.querySelector('#promptOkBtn').addEventListener('click', () => close(input.value));
+            overlay.querySelector('#promptCancelBtn').addEventListener('click', () => close(null));
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+            input.addEventListener('keydown', e => { if (e.key === 'Enter') close(input.value); });
+            setTimeout(() => input.focus(), 50);
+        });
+    }
+
     async function showRestoreDialog() {
         if (!accessToken) {
             showToast('Not connected to Google Drive', 'error');
@@ -1594,7 +1649,7 @@
     }
 
     async function disconnectDrive() {
-        if (confirm('Disconnect from Google Drive?')) {
+        if (await showConfirmModal('Disconnect from Google Drive?')) {
             await clearDriveToken();
             updateDriveUI(false);
             showToast('Disconnected from Google Drive', 'info');
@@ -2205,7 +2260,7 @@
                     await renderInvoices();
                 }));
                 document.querySelectorAll('.delete-invoice').forEach(btn => btn.addEventListener('click', async () => {
-                    if (confirm('Delete this invoice?')) { await dbDelete('invoices', Number(btn.dataset.id)); await renderInvoices(); }
+                    if (await showConfirmModal('Delete this invoice?')) { await dbDelete('invoices', Number(btn.dataset.id)); await renderInvoices(); }
                 }));
                 document.getElementById('applyInvFilter')?.addEventListener('click', () => {
                     fromDate = document.getElementById('invFromDate').value;
@@ -2646,7 +2701,7 @@
                 document.querySelectorAll('.edit-po').forEach(btn => btn.addEventListener('click', async () => { const po = await dbGetById('purchaseOrders', Number(btn.dataset.id)); if (po) showPOModal(po); }));
                 document.querySelectorAll('.export-po').forEach(btn => btn.addEventListener('click', () => exportPOPDF(Number(btn.dataset.id))));
                 document.querySelectorAll('.mark-received-btn, .mark-cancelled-btn, .mark-pending-btn').forEach(btn => btn.addEventListener('click', async () => { await updatePOStatus(Number(btn.dataset.id), btn.dataset.status); }));
-                document.querySelectorAll('.delete-po').forEach(btn => btn.addEventListener('click', async () => { if (confirm('Delete this PO?')) { await dbDelete('purchaseOrders', Number(btn.dataset.id)); await renderPurchaseOrders(); } }));
+                document.querySelectorAll('.delete-po').forEach(btn => btn.addEventListener('click', async () => { if (await showConfirmModal('Delete this PO?')) { await dbDelete('purchaseOrders', Number(btn.dataset.id)); await renderPurchaseOrders(); } }));
                 document.getElementById('applyPOFilter')?.addEventListener('click', () => { fromDate = document.getElementById('poFromDate').value; toDate = document.getElementById('poToDate').value; filteredPOs = filterByDateRange(allPOs, fromDate, toDate); renderTable(); });
                 document.getElementById('clearPOFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredPOs = [...allPOs]; renderTable(); });
             };
@@ -2925,7 +2980,7 @@
                 document.getElementById('addExpenseBtn')?.addEventListener('click', () => showExpenseModal());
                 document.getElementById('exportExpensesBtn')?.addEventListener('click', () => exportExpensesToExcel(filteredExpenses));
                 document.querySelectorAll('.edit-expense').forEach(b => b.addEventListener('click', async () => { const e = await dbGetById('expenses', Number(b.dataset.id)); if (e) showExpenseModal(e); }));
-                document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); }));
+                document.querySelectorAll('.delete-expense').forEach(b => b.addEventListener('click', async () => { if (await showConfirmModal('Delete this expense?')) { await dbDelete('expenses', Number(b.dataset.id)); await renderExpenses(); } }));
                 document.getElementById('applyExpFilter')?.addEventListener('click', () => { fromDate = document.getElementById('expFromDate').value; toDate = document.getElementById('expToDate').value; filteredExpenses = filterByDateRange(allExpenses, fromDate, toDate); renderTable(); });
                 document.getElementById('clearExpFilter')?.addEventListener('click', () => { fromDate = ''; toDate = ''; filteredExpenses = [...allExpenses]; renderTable(); });
             };
@@ -2991,7 +3046,7 @@
                 document.getElementById('addCustomerBtn')?.addEventListener('click', () => showCustomerModal());
                 document.getElementById('exportCustomersBtn')?.addEventListener('click', () => exportCustomersToExcel(filteredCustomers));
                 document.querySelectorAll('.edit-customer').forEach(b => b.addEventListener('click', async () => { const c = await dbGetById('customers', Number(b.dataset.id)); showCustomerModal(c); }));
-                document.querySelectorAll('.delete-customer').forEach(b => b.addEventListener('click', async () => { await dbDelete('customers', Number(b.dataset.id)); await renderCustomers(); }));
+                document.querySelectorAll('.delete-customer').forEach(b => b.addEventListener('click', async () => { if (await showConfirmModal('Delete this customer?')) { await dbDelete('customers', Number(b.dataset.id)); await renderCustomers(); } }));
             };
             const apply = () => { searchTerm = document.getElementById('custSearch').value.trim().toLowerCase(); filteredCustomers = allCustomers.filter(c => c.name.toLowerCase().includes(searchTerm)); renderTable(); };
             const clear = () => { searchTerm = ''; filteredCustomers = [...allCustomers]; renderTable(); };
@@ -3063,7 +3118,7 @@
                 document.getElementById('addSupplierBtn')?.addEventListener('click', () => showSupplierModal());
                 document.getElementById('exportSuppliersBtn')?.addEventListener('click', () => exportSuppliersToExcel(filteredSuppliers));
                 document.querySelectorAll('.edit-supplier').forEach(b => b.addEventListener('click', async () => { const s = await dbGetById('suppliers', Number(b.dataset.id)); showSupplierModal(s); }));
-                document.querySelectorAll('.delete-supplier').forEach(b => b.addEventListener('click', async () => { await dbDelete('suppliers', Number(b.dataset.id)); await renderSuppliers(); }));
+                document.querySelectorAll('.delete-supplier').forEach(b => b.addEventListener('click', async () => { if (await showConfirmModal('Delete this supplier?')) { await dbDelete('suppliers', Number(b.dataset.id)); await renderSuppliers(); } }));
             };
             const apply = () => { searchTerm = document.getElementById('supSearch').value.trim().toLowerCase(); filteredSuppliers = allSuppliers.filter(s => s.name.toLowerCase().includes(searchTerm)); renderTable(); };
             const clear = () => { searchTerm = ''; filteredSuppliers = [...allSuppliers]; renderTable(); };
@@ -3166,7 +3221,7 @@
                 mainContent.innerHTML = html;
                 document.getElementById('addProductBtn')?.addEventListener('click', () => showProductModal());
                 document.querySelectorAll('.edit-product').forEach(b => b.addEventListener('click', async () => { const p = await dbGetById('products', Number(b.dataset.id)); showProductModal(p); }));
-                document.querySelectorAll('.delete-product').forEach(b => b.addEventListener('click', async () => { await dbDelete('products', Number(b.dataset.id)); await renderProducts(); }));
+                document.querySelectorAll('.delete-product').forEach(b => b.addEventListener('click', async () => { if (await showConfirmModal('Delete this product?')) { await dbDelete('products', Number(b.dataset.id)); await renderProducts(); } }));
                 document.querySelectorAll('.view-transactions').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const productId = Number(btn.dataset.id);
@@ -3695,12 +3750,12 @@
     // ---------- Reset & Delete Data ----------
     async function resetAllData() {
         const confirmMsg = '⚠️ WARNING: This will permanently DELETE ALL data including customers, suppliers, products, invoices, POs, expenses, service records, warranties, notes, and all settings.\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to proceed?';
-        if (!confirm(confirmMsg)) {
+        if (!await showConfirmModal(confirmMsg)) {
             showToast('Reset cancelled', 'info');
             return;
         }
         const secondConfirm = 'Type "DELETE ALL" to confirm:';
-        const userInput = prompt(secondConfirm);
+        const userInput = await showPromptModal(secondConfirm);
         if (userInput !== 'DELETE ALL') {
             showToast('Reset cancelled - confirmation text did not match', 'info');
             return;
@@ -3737,6 +3792,41 @@
         } catch (err) {
             console.error('Reset error:', err);
             showToast('Error during reset: ' + err.message, 'error');
+        } finally {
+            _suppressAutoBackup = false;
+            scheduleAutoBackup();
+        }
+    }
+
+    async function generateSampleData() {
+        if (!await showConfirmModal('This will add sample data (customers, suppliers, products, invoices, POs, expenses, service records, warranties) to your existing data. Continue?')) return;
+        try {
+            showToast('Generating sample data...', 'info');
+            _suppressAutoBackup = true;
+
+            if (SAMPLE_DATA.profile) {
+                saveProfile(SAMPLE_DATA.profile);
+            }
+            for (const key of ['customers', 'suppliers', 'products', 'invoices', 'purchaseOrders', 'expenses', 'serviceHistory', 'warranties']) {
+                const items = SAMPLE_DATA[key];
+                if (items && items.length) {
+                    for (const item of items) {
+                        await dbAdd(key, item);
+                    }
+                }
+            }
+            // Skip settings from sample data (gdrive tokens etc)
+
+            showToast('✅ Sample data generated successfully!', 'success');
+            // Refresh current page if on a data page
+            const currentPage = document.querySelector('.sidebar-link.active');
+            if (currentPage) {
+                const page = currentPage.getAttribute('data-page') || 'invoices';
+                navigateTo(page);
+            }
+        } catch (err) {
+            console.error('Sample data error:', err);
+            showToast('Error generating sample data: ' + err.message, 'error');
         } finally {
             _suppressAutoBackup = false;
             scheduleAutoBackup();
@@ -3998,7 +4088,7 @@
     }
 
     async function disconnectLocalFile() {
-        if (confirm('Disconnect local file sync?')) {
+        if (await showConfirmModal('Disconnect local file sync?')) {
             await clearLocalFileHandleInfo();
             await updateLocalFileUI();
             showToast('Local file sync disconnected', 'info');
@@ -4121,6 +4211,12 @@
                 </div>
             </div>
 
+            <div class="card" style="border-color: #a7f3d0; background: #ecfdf5;">
+                <h3 style="color: #059669;">${iconSvg('plus')} Sample Data</h3>
+                <p style="color: #6b7280; margin-bottom: 12px;">Populate the app with sample customers, suppliers, products, invoices, purchase orders, expenses, service records, and warranties to explore the features.</p>
+                <button class="btn btn-success" id="generateSampleDataBtn">${iconSvg('plus')} Generate Sample Data</button>
+            </div>
+
             <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
                 <h3 style="color: #dc2626;">${iconSvg('trash')} Reset & Delete Data</h3>
                 <p style="color: #6b7280; margin-bottom: 12px;">Permanently erase all business data and reset the app to a fresh state. This action cannot be undone.</p>
@@ -4219,6 +4315,9 @@
             resetBtn.addEventListener('click', resetAllData);
         }
 
+        const sampleBtn = document.getElementById('generateSampleDataBtn');
+        if (sampleBtn) sampleBtn.addEventListener('click', generateSampleData);
+
         updateDriveUI(!!accessToken);
         updateLastBackupUI();
         updateSettingsUI();
@@ -4295,7 +4394,7 @@
                     throw new Error('Invalid backup file format');
                 }
                 const confirmMsg = '⚠️ WARNING: This will replace ALL existing data.\n\nAre you absolutely sure you want to proceed?';
-                if (!confirm(confirmMsg)) {
+                if (!await showConfirmModal(confirmMsg)) {
                     showToast('Import cancelled', 'info');
                     return;
                 }
@@ -4796,7 +4895,7 @@
         });
         document.querySelectorAll('.delete-service').forEach(btn => {
             btn.addEventListener('click', async () => {
-                if (confirm('Delete this service record?')) {
+                if (await showConfirmModal('Delete this service record?')) {
                     await dbDelete('serviceHistory', Number(btn.dataset.id));
                     await renderServiceWarranty();
                 }
@@ -4941,7 +5040,7 @@
         });
         document.querySelectorAll('.delete-warranty').forEach(btn => {
             btn.addEventListener('click', async () => {
-                if (confirm('Delete this warranty record?')) {
+                if (await showConfirmModal('Delete this warranty record?')) {
                     await dbDelete('warranties', Number(btn.dataset.id));
                     await renderServiceWarranty();
                 }
@@ -5575,7 +5674,7 @@
         deleteBtn.addEventListener('click', async () => {
             const id = editId.value;
             if (!id) { showToast('No note selected to delete', 'warning'); return; }
-            if (confirm('Delete this note?')) {
+            if (await showConfirmModal('Delete this note?')) {
                 await dbDelete('notes', Number(id));
                 showToast('Note deleted', 'info');
                 await renderNotepad();
