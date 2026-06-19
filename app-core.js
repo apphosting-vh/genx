@@ -5703,6 +5703,8 @@
     // ---- Start app ----
     openDB().then(async () => {
         updateOnlineStatus();
+        const verEl = document.getElementById('appVersion');
+        if (verEl) verEl.textContent = 'v' + APP_VERSION;
         registerServiceWorker();
         initGoogleDriveModule().catch(err => console.warn('Drive init background error:', err));
         initializeLocalFileSync().catch(err => console.warn('Local file sync init error:', err));
