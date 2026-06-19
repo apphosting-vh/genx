@@ -2310,7 +2310,7 @@
                         <div style="text-align:right; margin-top:16px;">
                             <button class="btn btn-secondary" id="editViewInvBtn">Edit</button>
                             <button class="btn btn-export" id="printViewInvBtn">Print / Export PDF</button>
-                            <button class="btn btn-outline" id="closeViewInvBtn2">Close</button>
+                            <button class="btn btn-dark" id="closeViewInvBtn2">Close</button>
                         </div>
                     </div>
                 </div>
@@ -2464,7 +2464,7 @@
                             </div>
                             <div class="form-group" style="margin-top:12px;"><label>Notes</label><textarea id="invNotes">${isEdit ? (invoiceData.notes || '') : ''}</textarea></div>
                             <div style="margin-top:16px; text-align:right;">
-                                <button type="button" class="btn btn-outline" id="cancelInvoiceBtn">Cancel</button>
+                                <button type="button" class="btn btn-dark" id="cancelInvoiceBtn">Cancel</button>
                                 <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Save'} Invoice</button>
                             </div>
                         </form>
@@ -2710,7 +2710,7 @@
                 </div>
             `;
             const modalContainer = document.getElementById('modalContainer');
-            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">${iconSvg('close')}</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-export" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-outline" id="closeViewPOBtn2">Close</button></div></div></div>`;
+            modalContainer.innerHTML = `<div class="modal-overlay" id="viewPOModalOverlay"><div class="modal" style="max-width:800px;"><button class="modal-close" id="closeViewPOModal">${iconSvg('close')}</button><div style="max-height:70vh; overflow-y:auto;">${content}</div><div style="text-align:right; margin-top:16px;"><button class="btn btn-secondary" id="editViewPOBtn">Edit</button><button class="btn btn-export" id="printViewPOBtn">Print / Export PDF</button><button class="btn btn-dark" id="closeViewPOBtn2">Close</button></div></div></div>`;
             const close = () => { modalContainer.innerHTML = ''; };
             document.getElementById('closeViewPOModal').addEventListener('click', close);
             document.getElementById('closeViewPOBtn2').addEventListener('click', close);
@@ -2792,7 +2792,7 @@
                 <div class="form-group"><label>Discount (₹)</label><input type="number" id="poDiscount" value="${defDiscount}" step="0.01"></div>
                 <div class="form-group"><label>Total Tax</label><div style="font-weight:700;" id="poTaxDisplay">₹ 0.00</div></div>
                 <div class="form-group"><label>Grand Total</label><div style="font-weight:800; font-size:1.2rem; color:var(--primary);" id="poGrandTotal">₹ 0.00</div></div></div></div>
-                <div style="margin-top:16px; text-align:right;"><button type="button" class="btn btn-outline" id="cancelPOBtn">Cancel</button> <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Save'}</button></div>
+                <div style="margin-top:16px; text-align:right;"><button type="button" class="btn btn-dark" id="cancelPOBtn">Cancel</button> <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Save'}</button></div>
                 </form></div></div>`;
             document.getElementById('modalContainer').innerHTML = modalHtml;
             const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
@@ -3502,7 +3502,7 @@
                             </div>
                         ` : `<p style="color: #6b7280;">No purchase orders found for this product.</p>`}
                         <div style="text-align:right; margin-top:16px;">
-                            <button class="btn btn-outline" id="closeProductTransactionsBtn">Close</button>
+                            <button class="btn btn-dark" id="closeProductTransactionsBtn">Close</button>
                         </div>
                     </div>
                 </div>
