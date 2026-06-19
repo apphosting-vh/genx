@@ -665,14 +665,16 @@
         }
         if (isRefreshing) {
             return new Promise((resolve, reject) => {
+                let waitTimeoutId;
                 const interval = setInterval(() => {
                     if (!isRefreshing) {
                         clearInterval(interval);
+                        clearTimeout(waitTimeoutId); // cancel dangling timeout
                         if (accessToken) resolve(accessToken);
                         else reject(new Error('Refresh failed'));
                     }
                 }, 100);
-                setTimeout(() => {
+                waitTimeoutId = setTimeout(() => {
                     clearInterval(interval);
                     reject(new Error('Refresh timed out waiting for previous refresh'));
                 }, timeoutMs);
@@ -721,18 +723,22 @@
                 } else {
                     setAccessToken(resp.access_token);
                     tokenExpiry = Date.now() + (resp.expires_in * 1000);
-                    dbSetSetting('gdrive_token', resp.access_token).then(() => {
-                        dbSetSetting('gdrive_expiry', tokenExpiry);
-                        scheduleTokenRefresh(tokenExpiry);
-                        setSyncState('idle');
-                        // Flush any syncs that were queued while the token was expired.
-                        // This is needed when the refresh is triggered by the proactive
-                        // timer (scheduleTokenRefresh) rather than by saveDriveToken.
-                        setTimeout(() => checkPendingSync(), 2000);
-                        resolve(accessToken);
-                    }).catch(err => {
-                        reject(err);
-                    });
+                    // Chain both DB writes so gdrive_expiry is guaranteed to be
+                    // persisted before we resolve, and errors in either write reach
+                    // the caller via reject() rather than being silently swallowed.
+                    dbSetSetting('gdrive_token', resp.access_token)
+                        .then(() => dbSetSetting('gdrive_expiry', tokenExpiry))
+                        .then(() => {
+                            scheduleTokenRefresh(tokenExpiry);
+                            setSyncState('idle');
+                            // Flush any syncs that were queued while the token was expired.
+                            // This is needed when the refresh is triggered by the proactive
+                            // timer (scheduleTokenRefresh) rather than by saveDriveToken.
+                            setTimeout(() => checkPendingSync(), 2000);
+                            resolve(accessToken);
+                        }).catch(err => {
+                            reject(err);
+                        });
                 }
             };
             try {
@@ -1449,7 +1455,8 @@
                 updateLastBackupUI();
                 if (showToastMsg) showToast('Backup uploaded to Google Drive', 'success');
             } else {
-                // sync file – just return success
+                // sync file – transition state and optionally toast
+                setSyncState('success');
                 if (showToastMsg) showToast('Sync successful', 'success');
             }
             return true;
@@ -1539,6 +1546,11 @@
         } finally {
             _suppressAutoBackup = false;
             scheduleAutoBackup();
+            // Update the local-change timestamp to reflect the restored data.
+            // During restore _suppressAutoBackup was true, so no dbAdd() call
+            // updated it; without this, lastLocalChange stays at its pre-restore
+            // value and the sync UI can falsely show "✅ Synced".
+            await updateLocalChangeTimestamp();
             scheduleRealTimeSync();
         }
     }
