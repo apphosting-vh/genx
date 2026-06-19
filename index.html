@@ -77,6 +77,90 @@
             --transition: 0.18s ease;
         }
 
+        /* ── Ocean Theme (Deep Blue) ──────────────────────────────────────── */
+        [data-theme="ocean"] {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --primary-muted: rgba(37, 99, 235, 0.12);
+
+            --logo-bg: #1d4ed8;
+            --logo-bg-hover: #1e40af;
+
+            --sidebar-bg: #0a1a38;
+            --sidebar-bg-gradient: linear-gradient(180deg, #0d1f42 0%, #071430 100%);
+            --sidebar-border: rgba(255,255,255,0.08);
+            --sidebar-text: rgba(255,255,255,0.72);
+            --sidebar-text-hover: #fff;
+            --sidebar-active-bg: rgba(37,99,235,0.25);
+            --sidebar-active-text: #fff;
+            --sidebar-hover-bg: rgba(96,165,250,0.12);
+            --sidebar-label: rgba(255,255,255,0.42);
+            --sidebar-accent: #3b82f6;
+
+            --bg: #eef2ff;
+            --card: #fff;
+            --text: #0f172a;
+            --text-secondary: #64748b;
+            --border: #dbe6f5;
+            --border-strong: #c4d4e8;
+        }
+
+        /* ── Azure Theme (Sky Blue) ──────────────────────────────────────── */
+        [data-theme="azure"] {
+            --primary: #0ea5e9;
+            --primary-hover: #0284c7;
+            --primary-muted: rgba(14,165,233,0.12);
+
+            --logo-bg: #0284c7;
+            --logo-bg-hover: #0369a1;
+
+            --sidebar-bg: #0c3550;
+            --sidebar-bg-gradient: linear-gradient(180deg, #0f3d5e 0%, #082a40 100%);
+            --sidebar-border: rgba(255,255,255,0.08);
+            --sidebar-text: rgba(255,255,255,0.72);
+            --sidebar-text-hover: #fff;
+            --sidebar-active-bg: rgba(14,165,233,0.22);
+            --sidebar-active-text: #fff;
+            --sidebar-hover-bg: rgba(56,189,248,0.12);
+            --sidebar-label: rgba(255,255,255,0.42);
+            --sidebar-accent: #38bdf8;
+
+            --bg: #f0f9ff;
+            --card: #fff;
+            --text: #0f172a;
+            --text-secondary: #64748b;
+            --border: #e0f2fe;
+            --border-strong: #bae6fd;
+        }
+
+        /* ── Sapphire Theme (Indigo) ─────────────────────────────────────── */
+        [data-theme="sapphire"] {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-muted: rgba(99,102,241,0.12);
+
+            --logo-bg: #4f46e5;
+            --logo-bg-hover: #4338ca;
+
+            --sidebar-bg: #1a1740;
+            --sidebar-bg-gradient: linear-gradient(180deg, #1f1b4d 0%, #13102e 100%);
+            --sidebar-border: rgba(255,255,255,0.08);
+            --sidebar-text: rgba(255,255,255,0.72);
+            --sidebar-text-hover: #fff;
+            --sidebar-active-bg: rgba(99,102,241,0.25);
+            --sidebar-active-text: #fff;
+            --sidebar-hover-bg: rgba(129,140,248,0.12);
+            --sidebar-label: rgba(255,255,255,0.42);
+            --sidebar-accent: #818cf8;
+
+            --bg: #eef2ff;
+            --card: #fff;
+            --text: #0f172a;
+            --text-secondary: #64748b;
+            --border: #e3e6f5;
+            --border-strong: #c8cde8;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -329,6 +413,12 @@
             background: linear-gradient(135deg, #047857, #065f46);
             box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35);
             border-color: transparent;
+        }
+        .theme-option:hover {
+            border-color: var(--sidebar-accent) !important;
+        }
+        .theme-option input:checked + span + span + span {
+            color: var(--primary);
         }
         .btn-danger {
             background: var(--danger-bg);
@@ -715,6 +805,56 @@
             transition: background 0.25s ease, color 0.25s ease;
         }
 
+        .filter-row .filter-cell {
+            padding: 4px 6px;
+            border-bottom: 2px solid var(--border-strong);
+        }
+        .table-filter-input {
+            width: 100%;
+            padding: 3px 6px;
+            font-size: 0.7rem;
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            background: var(--card);
+            color: var(--text);
+            outline: none;
+            box-sizing: border-box;
+            min-width: 40px;
+            cursor: pointer;
+        }
+        .table-filter-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px var(--primary-muted);
+        }
+        .table-filter-input::placeholder {
+            color: var(--text-secondary);
+            opacity: 0.6;
+        }
+        .filter-clear-btn {
+            display: none;
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            margin-left: 6px;
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            background: var(--card);
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .filter-clear-btn:hover {
+            background: var(--bg);
+            color: var(--text);
+        }
+        .filter-row.has-filters .filter-clear-btn {
+            display: inline-block;
+        }
+        .no-results-row td {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
         /* ── Note card styles ─────────────────────────────────────────── */
         .notes-grid {
             display: grid;
@@ -809,6 +949,14 @@
             height: 16px;
         }
     </style>
+    <script>
+        try {
+            var theme = localStorage.getItem('genfin_theme');
+            if (theme === 'ocean' || theme === 'azure' || theme === 'sapphire') {
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+        } catch(e) {}
+    </script>
 </head>
 <body>
 
