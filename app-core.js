@@ -4061,6 +4061,7 @@
             }
             const invoices = await dbGetAll('invoices');
             const purchaseOrders = await dbGetAll('purchaseOrders');
+            const serviceHistory = await dbGetAll('serviceHistory');
             const customers = await dbGetAll('customers');
             const suppliers = await dbGetAll('suppliers');
             const customerMap = Object.fromEntries(customers.map(c => [c.id, c.name]));
@@ -4071,6 +4072,10 @@
             );
             const relatedPOs = purchaseOrders.filter(po => 
                 po.items && po.items.some(item => Number(item.productId) === productId)
+            );
+            const relatedServices = serviceHistory.filter(s =>
+                s.partsConsumed && Array.isArray(s.partsConsumed) &&
+                s.partsConsumed.some(p => Number(p.productId) === productId)
             );
 
             const modalContent = `
@@ -4125,6 +4130,29 @@
                                 </table>
                             </div>
                         ` : `<p style="color: #6b7280;">No purchase orders found for this product.</p>`}
+
+                        <h4 style="margin-top: 24px;">🔧 Service History</h4>
+                        ${relatedServices.length ? `
+                            <div class="table-wrap">
+                                <table>
+                                    <thead><tr style="${TABLE_HEADER_STYLE}">
+                                        <th>Service ID</th><th>Date</th><th>Customer</th><th>Parts Consumed</th><th>Cost</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        ${relatedServices.map(s => `
+                                            <tr>
+                                                <td>${escapeHtml(s.serviceId)}</td>
+                                                <td>${formatDate(s.serviceDate)}</td>
+                                                <td>${escapeHtml(customerMap[s.customerId] || '')}</td>
+                                                <td>${escapeHtml(s.partsReplaced || '')}</td>
+                                                <td>${formatCurrency(s.serviceCost || 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `<p style="color: #6b7280;">No service records found for this product.</p>`}
+
                         <div style="text-align:right; margin-top:16px;">
                             <button class="btn btn-dark" id="closeProductTransactionsBtn">Close</button>
                         </div>
@@ -5535,7 +5563,7 @@
     }
 
     async function exportServicesToExcel(services, customerMap) {
-        const headers = ['Service ID', 'Customer', 'Serial #', 'Service Date', 'Runtime (hrs)', 'Next Due', 'Problem Reported', 'Resolution', 'Parts Replaced', 'Cost'];
+        const headers = ['Service ID', 'Customer', 'Serial #', 'Service Date', 'Runtime (hrs)', 'Next Due', 'Problem Reported', 'Resolution', 'Parts Replaced', 'Parts Consumed (IDs)', 'Cost'];
         const rows = services.map(s => [
             s.serviceId || '',
             customerMap[s.customerId] || '',
@@ -5546,6 +5574,7 @@
             s.problemReported || '',
             s.resolution || '',
             s.partsReplaced || '',
+            s.partsConsumed ? s.partsConsumed.map(p => p.productId).join('; ') : '',
             s.serviceCost || 0
         ]);
         const dateStr = new Date().toISOString().slice(0, 10);
@@ -5576,7 +5605,17 @@
                             <div class="form-group"><label>Runtime Hours</label><input type="number" step="0.1" id="serviceRuntime" value="${isEdit ? serviceData.runtimeHours || '' : ''}"></div>
                             <div class="form-group"><label>Problem Reported</label><textarea id="serviceProblem" rows="2">${isEdit ? escapeHtml(serviceData.problemReported || '') : ''}</textarea></div>
                             <div class="form-group"><label>Resolution</label><textarea id="serviceResolution" rows="2">${isEdit ? escapeHtml(serviceData.resolution || '') : ''}</textarea></div>
-                            <div class="form-group"><label>Parts Replaced</label><input id="serviceParts" value="${isEdit ? escapeHtml(serviceData.partsReplaced || '') : ''}"></div>
+                            <div class="form-group" style="grid-column: 1 / -1;"><label>Spare Parts Consumed</label>
+                                <div class="multi-select" id="sparePartsSelect">
+                                    <div class="multi-select-trigger" id="sparePartsTrigger">
+                                        <div class="multi-select-tags" id="sparePartsTags"></div>
+                                        <input type="text" class="multi-select-search" id="sparePartsSearch" placeholder="Search spare parts..." autocomplete="off">
+                                        <span class="multi-select-arrow">&#9660;</span>
+                                    </div>
+                                    <div class="multi-select-dropdown" id="sparePartsDropdown"></div>
+                                </div>
+                                <input type="hidden" id="serviceParts" value="${isEdit ? escapeHtml(serviceData.partsReplaced || '') : ''}">
+                            </div>
                             <div class="form-group"><label>Next Service Due Date</label><input type="date" id="serviceNextDue" value="${isEdit ? serviceData.nextServiceDueDate : ''}"></div>
                             <div class="form-group"><label>Service Cost (₹)</label><input type="number" step="0.01" id="serviceCost" value="${isEdit ? serviceData.serviceCost || 0 : 0}"></div>
                         </div>
@@ -5589,9 +5628,123 @@
         const close = () => { document.getElementById('modalContainer').innerHTML = ''; };
         document.getElementById('closeServiceModal').addEventListener('click', close);
         document.getElementById('serviceModalOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) close(); });
+
+        // ---- Initialize multi-select for spare parts ----
+        const spareParts = products.filter(p => p.type === 'Spare Part');
+        const sparePartsSelection = isEdit && serviceData.partsConsumed ? serviceData.partsConsumed.map(p => ({...p})) : [];
+
+        function renderSparePartTags() {
+            const container = document.getElementById('sparePartsTags');
+            if (!sparePartsSelection.length) {
+                container.innerHTML = '<span style="color:var(--text-secondary);font-size:0.78rem;padding:2px 0;">Select spare parts...</span>';
+            } else {
+                container.innerHTML = sparePartsSelection.map(p =>
+                    `<span class="multi-select-tag" data-product-id="${p.productId}">${escapeHtml(p.name)} <span class="multi-select-tag-remove" data-product-id="${p.productId}">&times;</span></span>`
+                ).join('');
+            }
+        }
+
+        function renderSparePartDropdown(filterText) {
+            const dropdown = document.getElementById('sparePartsDropdown');
+            const filtered = filterText ? spareParts.filter(p => p.name.toLowerCase().includes(filterText.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(filterText.toLowerCase()))) : spareParts;
+            if (!filtered.length) {
+                dropdown.innerHTML = '<div class="multi-select-no-results">No spare parts found</div>';
+                return;
+            }
+            dropdown.innerHTML = filtered.map(p => {
+                const checked = sparePartsSelection.some(sp => sp.productId === p.id);
+                return `<label class="multi-select-option">
+                    <input type="checkbox" data-product-id="${p.id}" ${checked ? 'checked' : ''}>
+                    <span class="multi-select-option-label">${escapeHtml(p.name)}</span>
+                    <span class="multi-select-option-stock">SKU: ${escapeHtml(p.sku || '—')}</span>
+                </label>`;
+            }).join('');
+            dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', function() {
+                    const productId = Number(this.dataset.productId);
+                    const product = spareParts.find(p => p.id === productId);
+                    if (this.checked) {
+                        if (!sparePartsSelection.some(sp => sp.productId === productId)) {
+                            sparePartsSelection.push({productId, name: product.name});
+                        }
+                    } else {
+                        const idx = sparePartsSelection.findIndex(sp => sp.productId === productId);
+                        if (idx !== -1) sparePartsSelection.splice(idx, 1);
+                    }
+                    renderSparePartTags();
+                });
+            });
+        }
+
+        renderSparePartTags();
+        renderSparePartDropdown('');
+
+        const sparePartsTrigger = document.getElementById('sparePartsTrigger');
+        const sparePartsDropdown = document.getElementById('sparePartsDropdown');
+        const sparePartsSearch = document.getElementById('sparePartsSearch');
+
+        function positionSparePartDropdown() {
+            const rect = sparePartsTrigger.getBoundingClientRect();
+            sparePartsDropdown.style.top = (rect.bottom + 2) + 'px';
+            sparePartsDropdown.style.left = rect.left + 'px';
+            sparePartsDropdown.style.width = Math.max(rect.width, 200) + 'px';
+        }
+
+        sparePartsTrigger.addEventListener('click', function(e) {
+            if (e.target.closest('.multi-select-tag-remove')) return;
+            const isOpening = !sparePartsDropdown.classList.contains('open');
+            if (isOpening) {
+                positionSparePartDropdown();
+                sparePartsDropdown.classList.add('open');
+                sparePartsSearch.focus();
+            } else {
+                sparePartsDropdown.classList.remove('open');
+            }
+        });
+
+        sparePartsSearch.addEventListener('input', function() {
+            renderSparePartDropdown(this.value);
+        });
+        sparePartsSearch.addEventListener('click', function(e) {
+            e.stopPropagation();
+            positionSparePartDropdown();
+            sparePartsDropdown.classList.add('open');
+        });
+
+        document.getElementById('sparePartsTags').addEventListener('click', function(e) {
+            const removeBtn = e.target.closest('.multi-select-tag-remove');
+            if (removeBtn) {
+                const productId = Number(removeBtn.dataset.productId);
+                const idx = sparePartsSelection.findIndex(sp => sp.productId === productId);
+                if (idx !== -1) sparePartsSelection.splice(idx, 1);
+                renderSparePartTags();
+                renderSparePartDropdown(sparePartsSearch.value);
+            }
+        });
+
+        function closeSparePartDropdown() {
+            sparePartsDropdown.classList.remove('open');
+        }
+
+        document.addEventListener('click', function _outsideClick(e) {
+            const container = document.getElementById('sparePartsSelect');
+            if (container && !container.contains(e.target)) {
+                closeSparePartDropdown();
+            }
+        });
+
+        window.addEventListener('scroll', function(e) {
+            var t = e.target;
+            if (t === document || t === window || t === document.documentElement || t === document.body) closeSparePartDropdown();
+        }, true);
+        window.addEventListener('resize', closeSparePartDropdown);
+
         document.getElementById('serviceForm').addEventListener('submit', async e => {
             e.preventDefault();
             try {
+                const partsReplaced = sparePartsSelection.length
+                    ? sparePartsSelection.map(p => p.name).join(', ')
+                    : document.getElementById('serviceParts').value;
                 const obj = {
                     serviceId: document.getElementById('serviceId').value,
                     customerId: parseInt(document.getElementById('serviceCustomer').value),
@@ -5600,7 +5753,8 @@
                     runtimeHours: parseFloat(document.getElementById('serviceRuntime').value) || 0,
                     problemReported: document.getElementById('serviceProblem').value,
                     resolution: document.getElementById('serviceResolution').value,
-                    partsReplaced: document.getElementById('serviceParts').value,
+                    partsReplaced: partsReplaced,
+                    partsConsumed: sparePartsSelection.length ? sparePartsSelection : null,
                     nextServiceDueDate: document.getElementById('serviceNextDue').value,
                     serviceCost: parseFloat(document.getElementById('serviceCost').value) || 0,
                 };
