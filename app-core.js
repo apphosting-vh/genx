@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.0.0';
+    const APP_VERSION = '1.1.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
@@ -2395,7 +2395,8 @@
             
             const renderTable = () => {
                 let html = `
-                    <div class="page-header"><h1 class="page-title">Invoices</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportInvoicesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addInvoiceBtn">${iconSvg('plus')} New Invoice</button></div></div>
+                    <div class="page-header"><h1 class="page-title">Invoices</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="downloadInvTemplateBtn">${iconSvg('export')} Template</button><button class="btn btn-export" id="exportInvoicesBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-secondary" id="importInvoicesBtn">${iconSvg('import')} Import Excel</button><button class="btn btn-primary" id="addInvoiceBtn">${iconSvg('plus')} New Invoice</button></div></div>
+                    <input type="file" id="invoiceExcelFileInput" accept=".xlsx,.xls" style="display:none;">
                     <div class="card">
                         <div class="filter-bar" style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end;">
                             <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="invFromDate" value="${fromDate}" style="padding: 8px;"></div>
@@ -2435,6 +2436,14 @@
                 
                 document.getElementById('addInvoiceBtn')?.addEventListener('click', () => showInvoiceModal());
                 document.getElementById('exportInvoicesBtn')?.addEventListener('click', () => exportInvoicesToExcel(filteredInvoices, customerMap));
+                document.getElementById('downloadInvTemplateBtn')?.addEventListener('click', downloadInvoicePOImportTemplate);
+                document.getElementById('importInvoicesBtn')?.addEventListener('click', () => document.getElementById('invoiceExcelFileInput')?.click());
+                document.getElementById('invoiceExcelFileInput')?.addEventListener('change', (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        importInvoicesFromExcel(e.target.files[0]);
+                        e.target.value = '';
+                    }
+                });
                 document.querySelectorAll('.view-invoice').forEach(btn => btn.addEventListener('click', () => showInvoiceViewModal(Number(btn.dataset.id))));
                 document.querySelectorAll('.edit-invoice').forEach(btn => btn.addEventListener('click', async () => {
                     const inv = await dbGetById('invoices', Number(btn.dataset.id));
@@ -2864,7 +2873,8 @@
             let filteredPOs = [...allPOs];
             
             const renderTable = () => {
-                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="exportPOsBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-primary" id="addPOBtn">${iconSvg('plus')} New PO</button></div></div>
+                let html = `<div class="page-header"><h1 class="page-title">Purchase Orders</h1><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-export" id="downloadPOTemplateBtn">${iconSvg('export')} Template</button><button class="btn btn-export" id="exportPOsBtn">${iconSvg('export')} Export Excel</button><button class="btn btn-secondary" id="importPOsBtn">${iconSvg('import')} Import Excel</button><button class="btn btn-primary" id="addPOBtn">${iconSvg('plus')} New PO</button></div></div>
+                <input type="file" id="poExcelFileInput" accept=".xlsx,.xls" style="display:none;">
                 <div class="card"><div class="filter-bar" style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end;">
                     <div class="form-group" style="margin-bottom:0;"><label>From Date</label><input type="date" id="poFromDate" value="${fromDate}" style="padding:8px;"></div>
                     <div class="form-group" style="margin-bottom:0;"><label>To Date</label><input type="date" id="poToDate" value="${toDate}" style="padding:8px;"></div>
@@ -2883,6 +2893,14 @@
                 mainContent.innerHTML = html;
                 document.getElementById('addPOBtn')?.addEventListener('click', () => showPOModal());
                 document.getElementById('exportPOsBtn')?.addEventListener('click', () => exportPOsToExcel(filteredPOs, supplierMap));
+                document.getElementById('downloadPOTemplateBtn')?.addEventListener('click', downloadInvoicePOImportTemplate);
+                document.getElementById('importPOsBtn')?.addEventListener('click', () => document.getElementById('poExcelFileInput')?.click());
+                document.getElementById('poExcelFileInput')?.addEventListener('change', (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        importPurchaseOrdersFromExcel(e.target.files[0]);
+                        e.target.value = '';
+                    }
+                });
                 document.querySelectorAll('.view-po').forEach(btn => btn.addEventListener('click', () => showPOViewModal(Number(btn.dataset.id))));
                 document.querySelectorAll('.edit-po').forEach(btn => btn.addEventListener('click', async () => { const po = await dbGetById('purchaseOrders', Number(btn.dataset.id)); if (po) showPOModal(po); }));
                 document.querySelectorAll('.export-po').forEach(btn => btn.addEventListener('click', () => exportPOPDF(Number(btn.dataset.id))));
@@ -3661,6 +3679,372 @@
             }
             showToast(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped`, 'success');
             await renderProducts();
+        } catch (err) {
+            console.error('Import error:', err);
+            showToast('Error importing: ' + err.message, 'error');
+            _suppressAutoBackup = false;
+        }
+    }
+
+    // ---- Invoice & PO Import Template ----
+    function downloadInvoicePOImportTemplate() {
+        const wb = XLSX.utils.book_new();
+
+        const invHeaders = ['Invoice #', 'Date', 'Customer Name', 'Payment Terms', 'Due Date', 'Status', 'Discount (₹)', 'Notes', 'Product Name', 'Qty', 'Rate (₹)', 'GST %'];
+        const invRows = [
+            ['(auto)', '2026-06-01', 'ABC Industries Pvt Ltd', 'Net 30', '2026-07-01', 'Unpaid', 0, 'Monthly maintenance services', '5KVA Generator', 1, 150000, 18],
+            ['', '', '', '', '', '', '', '', 'Installation Kit', 1, 5000, 18],
+            ['(auto)', '2026-06-15', 'Green Farms Ltd', 'Net 15', '2026-06-30', 'Unpaid', 1000, '', '10KVA Generator', 1, 250000, 18],
+            ['', '', '', '', '', '', '', '', 'AMC Service', 1, 12000, 18]
+        ];
+        const invWs = XLSX.utils.aoa_to_sheet([invHeaders, ...invRows]);
+        invWs['!cols'] = invHeaders.map((h, i) => ({ wch: i === 1 ? 14 : i === 2 ? 28 : i === 7 ? 30 : i === 8 ? 22 : i === 10 ? 12 : 14 }));
+        XLSX.utils.book_append_sheet(wb, invWs, 'Invoices');
+
+        const poHeaders = ['PO #', 'Date', 'Supplier Name', 'Status', 'Discount (₹)', 'Product Name', 'Qty', 'Rate (₹)', 'GST %'];
+        const poRows = [
+            ['(auto)', '2026-06-10', 'PowerGen Suppliers', 'Pending', 0, '5KVA Generator', 2, 125000, 18],
+            ['', '', '', '', '', 'Accessory Kit', 5, 2500, 18],
+            ['(auto)', '2026-06-20', 'SpareParts Co', 'Pending', 500, 'Air Filter', 10, 1200, 5],
+            ['', '', '', '', '', 'Oil Filter', 10, 800, 5]
+        ];
+        const poWs = XLSX.utils.aoa_to_sheet([poHeaders, ...poRows]);
+        poWs['!cols'] = poHeaders.map((h, i) => ({ wch: i === 2 ? 24 : i === 5 ? 20 : i === 7 ? 12 : 14 }));
+        XLSX.utils.book_append_sheet(wb, poWs, 'Purchase Orders');
+
+        const instructions = [
+            ['INVOICES & PURCHASE ORDERS IMPORT INSTRUCTIONS'],
+            [''],
+            ['INVOICES SHEET:'],
+            ['Column', 'Required', 'Description'],
+            ['Invoice #', 'No', 'Leave blank or "(auto)" to auto-generate. Same number groups line items under one invoice.'],
+            ['Date', 'Yes', 'Format: YYYY-MM-DD'],
+            ['Customer Name', 'Yes', 'Must exactly match an existing customer name in the system'],
+            ['Payment Terms', 'No', 'One of: Immediate, Net 15, Net 30, Net 45, Net 60. Default: Net 30'],
+            ['Due Date', 'No', 'Auto-calculated from Date + Payment Terms if left blank'],
+            ['Status', 'No', 'One of: Unpaid, Paid, Overdue. Default: Unpaid'],
+            ['Discount (₹)', 'No', 'Total discount amount in rupees. Default: 0'],
+            ['Notes', 'No', 'Optional invoice notes'],
+            ['Product Name', 'Yes', 'Must match an existing product name, or will be used as item description'],
+            ['Qty', 'Yes', 'Quantity (must be > 0)'],
+            ['Rate (₹)', 'Yes', 'Unit rate in rupees (must be > 0)'],
+            ['GST %', 'No', 'GST rate: 0, 5, 12, 18, or 28. Default: 18 (or product GST rate if found)'],
+            [''],
+            ['PURCHASE ORDERS SHEET:'],
+            ['Column', 'Required', 'Description'],
+            ['PO #', 'No', 'Leave blank or "(auto)" to auto-generate. Same number groups line items under one PO.'],
+            ['Date', 'Yes', 'Format: YYYY-MM-DD'],
+            ['Supplier Name', 'Yes', 'Must exactly match an existing supplier name in the system'],
+            ['Status', 'No', 'One of: Pending, Received, Cancelled. Default: Pending'],
+            ['Discount (₹)', 'No', 'Total discount amount. Default: 0'],
+            ['Product Name', 'Yes', 'Must match an existing product name, or used as item description'],
+            ['Qty', 'Yes', 'Quantity (must be > 0)'],
+            ['Rate (₹)', 'Yes', 'Unit rate (must be > 0)'],
+            ['GST %', 'No', 'GST rate. Default: 18 (or product GST rate if found)'],
+            [''],
+            ['NOTES:'],
+            ['- Delete sample rows before importing your data'],
+            ['- Customer/Supplier names are case-insensitive but must match existing records'],
+            ['- GST calculated based on business state vs. customer/supplier state (intra vs inter)'],
+            ['- For intra-state: CGST + SGST split equally. For inter-state: full IGST applied.'],
+            ['- If a product is not found in the system, the rate and GST from the row are used directly.']
+        ];
+        const instWs = XLSX.utils.aoa_to_sheet(instructions);
+        instWs['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 70 }];
+        XLSX.utils.book_append_sheet(wb, instWs, 'Instructions');
+
+        XLSX.writeFile(wb, 'genfin_invoice_po_import_template.xlsx');
+        showToast('Template downloaded', 'success');
+    }
+
+    async function importInvoicesFromExcel(file) {
+        try {
+            showToast('Reading file...', 'info');
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            if (!jsonData.length) {
+                showToast('Excel file is empty', 'error');
+                return;
+            }
+
+            const customers = await dbGetAll('customers');
+            const products = await dbGetAll('products');
+            const profile = getProfile();
+            const customerNameMap = {};
+            customers.forEach(c => { customerNameMap[c.name.toLowerCase().trim()] = c; });
+            const productNameMap = {};
+            products.forEach(p => { productNameMap[p.name.toLowerCase().trim()] = p; });
+
+            const invoices = [];
+            let currentInvoice = null;
+
+            for (const row of jsonData) {
+                const invNum = String(row['Invoice #'] || '').trim();
+                if (invNum) {
+                    if (currentInvoice && currentInvoice.items.length) invoices.push(currentInvoice);
+                    currentInvoice = {
+                        invoiceNumber: invNum === '(auto)' ? '' : invNum,
+                        date: String(row['Date'] || '').trim(),
+                        customerName: String(row['Customer Name'] || '').trim(),
+                        paymentTerms: String(row['Payment Terms'] || 'Net 30').trim(),
+                        dueDate: String(row['Due Date'] || '').trim(),
+                        status: String(row['Status'] || 'Unpaid').trim(),
+                        discount: parseFloat(row['Discount (₹)']) || 0,
+                        notes: String(row['Notes'] || '').trim(),
+                        items: []
+                    };
+                } else if (!currentInvoice) {
+                    const date = String(row['Date'] || '').trim();
+                    const customerName = String(row['Customer Name'] || '').trim();
+                    if (date && customerName) {
+                        currentInvoice = {
+                            invoiceNumber: '',
+                            date: date,
+                            customerName: customerName,
+                            paymentTerms: String(row['Payment Terms'] || 'Net 30').trim(),
+                            dueDate: String(row['Due Date'] || '').trim(),
+                            status: String(row['Status'] || 'Unpaid').trim(),
+                            discount: parseFloat(row['Discount (₹)']) || 0,
+                            notes: String(row['Notes'] || '').trim(),
+                            items: []
+                        };
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (currentInvoice) {
+                    const productName = String(row['Product Name'] || '').trim();
+                    const qty = parseFloat(row['Qty']) || 0;
+                    const rate = parseFloat(row['Rate (₹)']) || 0;
+                    if (productName && qty > 0 && rate > 0) {
+                        const gstRate = (row['GST %'] !== '' && row['GST %'] !== undefined && row['GST %'] !== null) ? parseFloat(row['GST %']) : null;
+                        currentInvoice.items.push({ productName, qty, rate, gstRate });
+                    }
+                }
+            }
+            if (currentInvoice && currentInvoice.items.length) invoices.push(currentInvoice);
+
+            if (!invoices.length) {
+                showToast('No valid invoice data found', 'error');
+                return;
+            }
+
+            let added = 0, skipped = 0;
+            _suppressAutoBackup = true;
+            try {
+                for (const inv of invoices) {
+                    const customer = customerNameMap[inv.customerName.toLowerCase().trim()];
+                    if (!customer) { skipped++; continue; }
+                    if (!inv.items.length) { skipped++; continue; }
+                    if (!inv.date) { skipped++; continue; }
+
+                    const itemsRaw = inv.items.map(item => {
+                        const product = productNameMap[item.productName.toLowerCase().trim()];
+                        const gstRate = item.gstRate !== null ? item.gstRate : (product ? product.gstRate : 18);
+                        return {
+                            productId: product ? product.id : '',
+                            qty: item.qty,
+                            rate: item.rate,
+                            selectedGstRate: gstRate
+                        };
+                    });
+
+                    const stateOfSupply = customer.state || profile.state;
+                    const discount = inv.discount;
+                    const result = applyDiscountAndRecalcTaxes(itemsRaw, discount, stateOfSupply, profile.state, products);
+
+                    result.items.forEach((item, idx) => {
+                        const orig = inv.items[idx];
+                        if (orig && (item.description === 'Unknown Item' || !item.description)) {
+                            item.description = orig.productName;
+                        }
+                    });
+
+                    let dueDate = inv.dueDate;
+                    if (!dueDate && inv.date) {
+                        let days = 0;
+                        if (inv.paymentTerms === 'Immediate') days = 0;
+                        else if (inv.paymentTerms.startsWith('Net')) days = parseInt(inv.paymentTerms.split(' ')[1]) || 0;
+                        if (days > 0) dueDate = addDays(inv.date, days);
+                        else dueDate = inv.date;
+                    }
+
+                    let invoiceNumber = inv.invoiceNumber;
+                    if (!invoiceNumber) {
+                        invoiceNumber = await getNextInvoiceNumber();
+                        await incrementInvoiceNumber();
+                    }
+
+                    const invoiceObj = {
+                        invoiceNumber,
+                        date: inv.date,
+                        customerId: customer.id,
+                        items: result.items,
+                        subtotal: result.subtotal,
+                        discount,
+                        totalTax: result.totalTax,
+                        grandTotal: result.grandTotal,
+                        paymentTerms: inv.paymentTerms || 'Net 30',
+                        dueDate: dueDate || inv.date,
+                        paymentStatus: inv.status || 'Unpaid',
+                        notes: inv.notes || '',
+                        stateOfSupply,
+                        isIntraState: getGstRates(stateOfSupply, profile.state).intra
+                    };
+
+                    await dbAdd('invoices', invoiceObj);
+                    added++;
+                }
+            } finally {
+                _suppressAutoBackup = false;
+                scheduleAutoBackup();
+            }
+
+            showToast(`Import complete: ${added} invoices added, ${skipped} skipped`, 'success');
+            await renderInvoices();
+        } catch (err) {
+            console.error('Import error:', err);
+            showToast('Error importing: ' + err.message, 'error');
+            _suppressAutoBackup = false;
+        }
+    }
+
+    async function importPurchaseOrdersFromExcel(file) {
+        try {
+            showToast('Reading file...', 'info');
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            if (!jsonData.length) {
+                showToast('Excel file is empty', 'error');
+                return;
+            }
+
+            const suppliers = await dbGetAll('suppliers');
+            const products = await dbGetAll('products');
+            const profile = getProfile();
+            const supplierNameMap = {};
+            suppliers.forEach(s => { supplierNameMap[s.name.toLowerCase().trim()] = s; });
+            const productNameMap = {};
+            products.forEach(p => { productNameMap[p.name.toLowerCase().trim()] = p; });
+
+            const pos = [];
+            let currentPO = null;
+
+            for (const row of jsonData) {
+                const poNum = String(row['PO #'] || '').trim();
+                if (poNum) {
+                    if (currentPO && currentPO.items.length) pos.push(currentPO);
+                    currentPO = {
+                        poNumber: poNum === '(auto)' ? '' : poNum,
+                        date: String(row['Date'] || '').trim(),
+                        supplierName: String(row['Supplier Name'] || '').trim(),
+                        status: String(row['Status'] || 'Pending').trim(),
+                        discount: parseFloat(row['Discount (₹)']) || 0,
+                        items: []
+                    };
+                } else if (!currentPO) {
+                    const date = String(row['Date'] || '').trim();
+                    const supplierName = String(row['Supplier Name'] || '').trim();
+                    if (date && supplierName) {
+                        currentPO = {
+                            poNumber: '',
+                            date: date,
+
+                            supplierName: supplierName,
+                            status: String(row['Status'] || 'Pending').trim(),
+                            discount: parseFloat(row['Discount (₹)']) || 0,
+                            items: []
+                        };
+                    } else {
+                        continue;
+                    }
+                }
+                }
+
+                if (currentPO) {
+                    const productName = String(row['Product Name'] || '').trim();
+                    const qty = parseFloat(row['Qty']) || 0;
+                    const rate = parseFloat(row['Rate (₹)']) || 0;
+                    if (productName && qty > 0 && rate > 0) {
+                        const gstRate = (row['GST %'] !== '' && row['GST %'] !== undefined && row['GST %'] !== null) ? parseFloat(row['GST %']) : null;
+                        currentPO.items.push({ productName, qty, rate, gstRate });
+                    }
+                }
+            }
+            if (currentPO && currentPO.items.length) pos.push(currentPO);
+
+            if (!pos.length) {
+                showToast('No valid PO data found', 'error');
+                return;
+            }
+
+            let added = 0, skipped = 0;
+            _suppressAutoBackup = true;
+            try {
+                for (const po of pos) {
+                    const supplier = supplierNameMap[po.supplierName.toLowerCase().trim()];
+                    if (!supplier) { skipped++; continue; }
+                    if (!po.items.length) { skipped++; continue; }
+                    if (!po.date) { skipped++; continue; }
+
+                    const itemsRaw = po.items.map(item => {
+                        const product = productNameMap[item.productName.toLowerCase().trim()];
+                        const gstRate = item.gstRate !== null ? item.gstRate : (product ? product.gstRate : 18);
+                        return {
+                            productId: product ? product.id : '',
+                            qty: item.qty,
+                            rate: item.rate,
+                            selectedGstRate: gstRate
+                        };
+                    });
+
+                    const stateOfSupply = supplier.state || profile.state;
+                    const discount = po.discount;
+                    const result = applyDiscountAndRecalcTaxes(itemsRaw, discount, stateOfSupply, profile.state, products);
+
+                    result.items.forEach((item, idx) => {
+                        const orig = po.items[idx];
+                        if (orig && (item.description === 'Unknown Item' || !item.description)) {
+                            item.description = orig.productName;
+                        }
+                    });
+
+                    let poNumber = po.poNumber;
+                    if (!poNumber) {
+                        poNumber = await getNextPONumber();
+                        await incrementPONumber();
+                    }
+
+                    const poObj = {
+                        poNumber,
+                        date: po.date,
+                        supplierId: supplier.id,
+                        items: result.items,
+                        subtotal: result.subtotal,
+                        discount,
+                        totalTax: result.totalTax,
+                        grandTotal: result.grandTotal,
+                        status: po.status || 'Pending',
+                        stateOfSupply
+                    };
+
+                    await dbAdd('purchaseOrders', poObj);
+                    added++;
+                }
+            } finally {
+                _suppressAutoBackup = false;
+                scheduleAutoBackup();
+            }
+
+            showToast(`Import complete: ${added} POs added, ${skipped} skipped`, 'success');
+            await renderPurchaseOrders();
         } catch (err) {
             console.error('Import error:', err);
             showToast('Error importing: ' + err.message, 'error');
