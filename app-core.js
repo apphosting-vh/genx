@@ -4746,7 +4746,7 @@
                         </div>
                         <div id="gdriveActions" style="display:none; margin-top: 8px;">
                             <button class="btn btn-primary" id="gdriveBackupBtn">Backup Now</button>
-                            <button class="btn btn-secondary" id="gdriveRestoreBtn">Download Latest Data from Google Drive</button>
+                            <button class="btn btn-yellow" id="gdriveRestoreBtn">Download Latest Data from Google Drive</button>
                             <button class="btn btn-danger" id="gdriveDisconnectBtn" style="display:none;">Disconnect</button>
                             <button class="btn btn-warning" id="gdriveReconnectBtn" style="display:none;">Reconnect</button>
                         </div>
