@@ -3966,7 +3966,6 @@
                         continue;
                     }
                 }
-                }
 
                 if (currentPO) {
                     const productName = String(row['Product Name'] || '').trim();
