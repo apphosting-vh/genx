@@ -2694,7 +2694,7 @@
                         <h3>${title}</h3>
                         <form id="invoiceForm">
                             <div class="form-grid">
-                                <div class="form-group"><label>Invoice Number</label><input type="text" id="invNumber" value="${isEdit ? invoiceData.invoiceNumber : await getNextInvoiceNumber()}" ${isEdit ? '' : 'readonly'}></div>
+                                <div class="form-group"><label>Invoice Number</label><input type="text" id="invNumber" value="${isEdit ? invoiceData.invoiceNumber : await getNextInvoiceNumber()}"></div>
                                 <div class="form-group"><label>Date</label><input type="date" id="invDate" value="${defDate}"></div>
                                 <div class="form-group"><label>Customer</label><select id="invCustomer">${customers.map(c => `<option value="${c.id}" ${isEdit && invoiceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></div>
                                 <div class="form-group"><label>Payment Terms</label><select id="invPaymentTerms">${PAYMENT_TERMS.map(term => `<option value="${term}" ${term === defTerms ? 'selected' : ''}>${term}</option>`).join('')}</select></div>
@@ -3041,7 +3041,7 @@
             const defStatus = isEdit ? poData.status : 'Pending';
             const defDiscount = isEdit && poData.discount !== undefined ? poData.discount : 0;
             const modalHtml = `<div class="modal-overlay" id="poModalOverlay"><div class="modal"><button class="modal-close" id="closePOModal">${iconSvg('close')}</button><h3>${isEdit ? 'Edit' : 'New'} Purchase Order</h3>
-                <form id="poForm"><div class="form-grid"><div class="form-group"><label>PO Number</label><input type="text" id="poNumber" value="${isEdit ? poData.poNumber : await getNextPONumber()}" ${isEdit ? '' : 'readonly'}></div>
+                <form id="poForm"><div class="form-grid"><div class="form-group"><label>PO Number</label><input type="text" id="poNumber" value="${isEdit ? poData.poNumber : await getNextPONumber()}"></div>
                 <div class="form-group"><label>Date</label><input type="date" id="poDate" value="${isEdit ? poData.date : new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Supplier</label><select id="poSupplier">${suppliers.map(s => `<option value="${s.id}" ${isEdit && poData.supplierId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
                 <div class="form-group"><label>Status</label><select id="poStatus">${PO_STATUSES.map(s => `<option value="${s}" ${s === defStatus ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
@@ -5595,7 +5595,7 @@
                     <h3>${isEdit ? 'Edit' : 'New'} Service Record</h3>
                     <form id="serviceForm">
                         <div class="form-grid">
-                            <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : nextId}" readonly></div>
+                            <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : nextId}"></div>
                             <div class="form-group"><label>Customer *</label><select id="serviceCustomer" required>${customerOptions}</select></div>
                             <div class="form-group"><label>Generator Serial Number</label>
                                 <input list="serialList" id="serviceSerial" value="${isEdit ? escapeHtml(serviceData.generatorSerialNumber || '') : ''}">
@@ -5863,7 +5863,7 @@
                     <h3>${isEdit ? 'Edit' : 'New'} Warranty</h3>
                     <form id="warrantyForm">
                         <div class="form-grid">
-                            <div class="form-group"><label>Warranty ID</label><input type="text" id="warrantyId" value="${isEdit ? warrantyData.warrantyId : nextId}" readonly></div>
+                            <div class="form-group"><label>Warranty ID</label><input type="text" id="warrantyId" value="${isEdit ? warrantyData.warrantyId : nextId}"></div>
                             <div class="form-group"><label>Customer *</label><select id="warrantyCustomer" required>${customerOptions}</select></div>
                             <div class="form-group"><label>Generator Serial Number</label>
                                 <input list="serialListW" id="warrantySerial" value="${isEdit ? escapeHtml(warrantyData.generatorSerialNumber || '') : ''}">
