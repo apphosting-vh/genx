@@ -1537,6 +1537,24 @@
         return response.result.files || [];
     }
 
+    async function restoreLatestFromDrive() {
+        if (!accessToken) {
+            showToast('Not connected to Google Drive', 'error');
+            return false;
+        }
+        try {
+            const meta = await getLatestBackupMetadata(GD_BACKUP_FILENAME);
+            if (!meta) {
+                showToast('No backup found in Google Drive', 'info');
+                return false;
+            }
+            return await restoreFromDrive(meta.id);
+        } catch (err) {
+            showToast('Error fetching latest backup: ' + err.message, 'error');
+            return false;
+        }
+    }
+
     async function restoreFromDrive(fileId) {
         if (!accessToken) throw new Error('Not connected');
         const response = await withTokenRetry(() =>
@@ -4728,7 +4746,7 @@
                         </div>
                         <div id="gdriveActions" style="display:none; margin-top: 8px;">
                             <button class="btn btn-primary" id="gdriveBackupBtn">Backup Now</button>
-                            <button class="btn btn-secondary" id="gdriveRestoreBtn">Restore from Drive</button>
+                            <button class="btn btn-secondary" id="gdriveRestoreBtn">Download Latest Data from Google Drive</button>
                             <button class="btn btn-danger" id="gdriveDisconnectBtn" style="display:none;">Disconnect</button>
                             <button class="btn btn-warning" id="gdriveReconnectBtn" style="display:none;">Reconnect</button>
                         </div>
@@ -4933,7 +4951,7 @@
         const backupBtn = document.getElementById('gdriveBackupBtn');
         if (backupBtn) backupBtn.addEventListener('click', () => uploadBackupToDrive(true, GD_BACKUP_FILENAME));
         const restoreBtn = document.getElementById('gdriveRestoreBtn');
-        if (restoreBtn) restoreBtn.addEventListener('click', showRestoreDialog);
+        if (restoreBtn) restoreBtn.addEventListener('click', restoreLatestFromDrive);
         const disconnectBtn = document.getElementById('gdriveDisconnectBtn');
         if (disconnectBtn) disconnectBtn.addEventListener('click', disconnectDrive);
 
