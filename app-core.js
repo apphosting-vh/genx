@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.1.0';
+    const APP_VERSION = '1.2.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
@@ -2714,14 +2714,14 @@
                             <div class="form-grid">
                                 <div class="form-group"><label>Invoice Number</label><input type="text" id="invNumber" value="${isEdit ? invoiceData.invoiceNumber : await getNextInvoiceNumber()}"></div>
                                 <div class="form-group"><label>Date</label><input type="date" id="invDate" value="${defDate}"></div>
-                                <div class="form-group"><label>Customer</label><select id="invCustomer">${customers.map(c => `<option value="${c.id}" ${isEdit && invoiceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></div>
+                                <div class="form-group"><label>Customer</label><div style="display:flex;gap:4px;"><select id="invCustomer" style="flex:1;">${customers.map(c => `<option value="${c.id}" ${isEdit && invoiceData.customerId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select><button type="button" class="btn btn-primary btn-sm" id="addCustomerOnFly" style="white-space:nowrap;padding:4px 10px;" title="Add new customer">+ Add</button></div></div>
                                 <div class="form-group"><label>Payment Terms</label><select id="invPaymentTerms">${PAYMENT_TERMS.map(term => `<option value="${term}" ${term === defTerms ? 'selected' : ''}>${term}</option>`).join('')}</select></div>
                                 <div class="form-group"><label>Due Date (auto)</label><input type="date" id="invDueDate" readonly value="${defDueDate}"></div>
                                 <div class="form-group"><label>Payment Status</label><select id="invStatus">${INVOICE_STATUSES.map(s => `<option value="${s}" ${s === defStatus ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
                             </div>
                             <h4 style="margin-top:16px;">Items</h4>
                             <div id="invoiceItemsContainer">${(isEdit ? invoiceData.items : []).map((item, idx) => invoiceItemRow(item, idx, products)).join('')}</div>
-                            <button type="button" class="btn btn-outline btn-sm" id="addInvoiceItem">${iconSvg('plus')} Add Item</button>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"><button type="button" class="btn btn-yellow btn-sm" id="addInvoiceItem">${iconSvg('plus')} Add Existing Item</button><button type="button" class="btn btn-primary btn-sm" id="addProductOnFly" title="Add new inventory item">${iconSvg('plus')} Add New Item</button></div>
                             <div class="card" style="margin-top:16px; background:#f8fafc;">
                                 <div class="form-grid span-3">
                                     <div class="form-group"><label>Subtotal (Taxable)</label><div style="font-weight:700; font-size:1rem;" id="invSubtotalDisplay">₹ 0.00</div></div>
@@ -2736,6 +2736,7 @@
                                 <button type="submit" class="btn btn-primary">${isEdit ? 'Update' : 'Save'} Invoice</button>
                             </div>
                         </form>
+                        <div id="quickAddPanel" style="display:none; position:absolute; inset:0; background:#fff; z-index:15; padding:24px; overflow-y:auto; border-radius:14px;"></div>
                     </div>
                 </div>
             `;
@@ -2878,6 +2879,115 @@
                 }
             });
             updateBreakdown();
+
+            // ---- Quick-add Customer & Product ----
+            const quickAddPanel = document.getElementById('quickAddPanel');
+
+            function refreshCustomerDropdown(selectId) {
+                dbGetAll('customers').then(all => {
+                    customers.length = 0;
+                    customers.push(...all);
+                    const sel = document.getElementById(selectId);
+                    if (!sel) return;
+                    const currentVal = sel.value;
+                    sel.innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                    if (currentVal && customers.some(c => c.id == currentVal)) sel.value = currentVal;
+                    if (sel.value !== currentVal) sel.value = customers.length ? customers[customers.length - 1].id : '';
+                });
+            }
+
+            document.getElementById('addCustomerOnFly').addEventListener('click', function() {
+                quickAddPanel.innerHTML = `
+                    <h3 style="margin-bottom:16px;">Add Customer</h3>
+                    <div class="form-grid">
+                        <div class="form-group"><label>Name *</label><input id="qcName" required></div>
+                        <div class="form-group"><label>GSTIN</label><input id="qcGstin"></div>
+                        <div class="form-group"><label>State</label><input id="qcState"></div>
+                        <div class="form-group"><label>Phone</label><input id="qcPhone"></div>
+                        <div class="form-group full"><label>Address</label><textarea id="qcAddress" rows="2"></textarea></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                        <button class="btn btn-primary" id="saveQuickCustomer">Save Customer</button>
+                        <button class="btn btn-secondary" id="cancelQuickAdd">Cancel</button>
+                    </div>
+                `;
+                quickAddPanel.style.display = 'block';
+                document.getElementById('saveQuickCustomer').addEventListener('click', async function() {
+                    const name = document.getElementById('qcName').value.trim();
+                    if (!name) { showToast('Customer name is required', 'error'); return; }
+                    const obj = {
+                        name: name,
+                        gstin: document.getElementById('qcGstin').value.trim(),
+                        state: document.getElementById('qcState').value.trim(),
+                        phone: document.getElementById('qcPhone').value.trim(),
+                        address: document.getElementById('qcAddress').value.trim()
+                    };
+                    try {
+                        const newId = await dbAdd('customers', obj);
+                        obj.id = newId;
+                        customers.push(obj);
+                        const sel = document.getElementById('invCustomer');
+                        sel.innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                        sel.value = newId;
+                        quickAddPanel.style.display = 'none';
+                        updateBreakdown();
+                        showToast('Customer added', 'success');
+                    } catch (err) { showToast('Error saving customer', 'error'); }
+                });
+                document.getElementById('cancelQuickAdd').addEventListener('click', function() {
+                    quickAddPanel.style.display = 'none';
+                });
+            });
+
+            document.getElementById('addProductOnFly').addEventListener('click', function() {
+                quickAddPanel.innerHTML = `
+                    <h3 style="margin-bottom:16px;">Add Inventory Item</h3>
+                    <div class="form-grid">
+                        <div class="form-group"><label>Type</label><select id="qpType">${PRODUCT_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+                        <div class="form-group"><label>Item Name *</label><input id="qpName" required></div>
+                        <div class="form-group"><label>SKU</label><input id="qpSku"></div>
+                        <div class="form-group"><label>Selling Price (₹)</label><input type="number" step="0.01" id="qpPrice" value="0"></div>
+                        <div class="form-group"><label>GST %</label><input type="number" step="0.1" id="qpGst" value="18"></div>
+                        <div class="form-group"><label>Stock Quantity</label><input type="number" id="qpStock" value="0"></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                        <button class="btn btn-primary" id="saveQuickProduct">Save Item</button>
+                        <button class="btn btn-secondary" id="cancelQuickAdd">Cancel</button>
+                    </div>
+                `;
+                quickAddPanel.style.display = 'block';
+                document.getElementById('saveQuickProduct').addEventListener('click', async function() {
+                    const name = document.getElementById('qpName').value.trim();
+                    if (!name) { showToast('Item name is required', 'error'); return; }
+                    const obj = {
+                        type: document.getElementById('qpType').value,
+                        sku: document.getElementById('qpSku').value.trim(),
+                        name: name,
+                        sellingPrice: parseFloat(document.getElementById('qpPrice').value) || 0,
+                        gstRate: parseFloat(document.getElementById('qpGst').value) || 18,
+                        stockQuantity: parseInt(document.getElementById('qpStock').value) || 0,
+                        purchasePrice: 0, reorderLevel: 0, status: 'In Stock',
+                        brand: '', modelNumber: '', category: '', fuelType: '', capacityKva: 0,
+                        outputVoltage: '', phase: '', frequency: '', engineModel: '',
+                        alternatorModel: '', serialNumber: '', manufacturingYear: null,
+                        warrantyPeriod: null, supplierId: null
+                    };
+                    try {
+                        const newId = await dbAdd('products', obj);
+                        obj.id = newId;
+                        products.push(obj);
+                        const container = document.getElementById('invoiceItemsContainer');
+                        const idx = container.children.length;
+                        container.insertAdjacentHTML('beforeend', invoiceItemRow({productId: newId, qty: 1, rate: obj.sellingPrice || 0, selectedGstRate: obj.gstRate || 18}, idx, products));
+                        quickAddPanel.style.display = 'none';
+                        updateBreakdown();
+                        showToast('Item added', 'success');
+                    } catch (err) { showToast('Error saving item', 'error'); }
+                });
+                document.getElementById('cancelQuickAdd').addEventListener('click', function() {
+                    quickAddPanel.style.display = 'none';
+                });
+            });
         } catch (err) { showToast('Error opening invoice form', 'error'); }
     }
 
@@ -5480,9 +5590,10 @@
 
     // Remove row handler
     document.addEventListener('click', e => {
-        if (e.target.classList.contains('remove-item-row') || e.target.classList.contains('remove-row')) {
-            e.target.closest('.invoice-item-row, .po-item-row')?.remove();
-            const form = e.target.closest('form');
+        const removeBtn = e.target.closest('.remove-item-row, .remove-row');
+        if (removeBtn) {
+            removeBtn.closest('.invoice-item-row, .po-item-row')?.remove();
+            const form = removeBtn.closest('form');
             if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
         }
     });
@@ -5614,7 +5725,7 @@
                     <form id="serviceForm">
                         <div class="form-grid">
                             <div class="form-group"><label>Service ID</label><input type="text" id="serviceId" value="${isEdit ? serviceData.serviceId : nextId}"></div>
-                            <div class="form-group"><label>Customer *</label><select id="serviceCustomer" required>${customerOptions}</select></div>
+                            <div class="form-group"><label>Customer *</label><div style="display:flex;gap:4px;"><select id="serviceCustomer" required style="flex:1;">${customerOptions}</select><button type="button" class="btn btn-primary btn-sm" id="addCustomerOnFlySvc" style="white-space:nowrap;padding:4px 10px;" title="Add new customer">+ Add</button></div></div>
                             <div class="form-group"><label>Generator Serial Number</label>
                                 <input list="serialList" id="serviceSerial" value="${isEdit ? escapeHtml(serviceData.generatorSerialNumber || '') : ''}">
                                 <datalist id="serialList">${serialOptions}</datalist>
@@ -5633,12 +5744,14 @@
                                     <div class="multi-select-dropdown" id="sparePartsDropdown"></div>
                                 </div>
                                 <input type="hidden" id="serviceParts" value="${isEdit ? escapeHtml(serviceData.partsReplaced || '') : ''}">
+                                <div style="margin-top:6px;"><button type="button" class="btn btn-primary btn-sm" id="addProductOnFlySvc">${iconSvg('plus')} Add New Item</button></div>
                             </div>
                             <div class="form-group"><label>Next Service Due Date</label><input type="date" id="serviceNextDue" value="${isEdit ? serviceData.nextServiceDueDate : ''}"></div>
                             <div class="form-group"><label>Service Cost (₹)</label><input type="number" step="0.01" id="serviceCost" value="${isEdit ? serviceData.serviceCost || 0 : 0}"></div>
                         </div>
                         <button type="submit" class="btn btn-primary" style="margin-top:12px;">${isEdit ? 'Update' : 'Save'}</button>
                     </form>
+                    <div id="quickAddPanelSvc" style="display:none; position:absolute; inset:0; background:#fff; z-index:15; padding:24px; overflow-y:auto; border-radius:14px;"></div>
                 </div>
             </div>
         `;
@@ -5756,6 +5869,115 @@
             if (t === document || t === window || t === document.documentElement || t === document.body) closeSparePartDropdown();
         }, true);
         window.addEventListener('resize', closeSparePartDropdown);
+
+        // ---- Quick-add Customer & Product ----
+        const qpSvc = document.getElementById('quickAddPanelSvc');
+
+        function refreshSvcCustomerDropdown() {
+            dbGetAll('customers').then(all => {
+                customers.length = 0;
+                customers.push(...all);
+                const sel = document.getElementById('serviceCustomer');
+                if (!sel) return;
+                const currentVal = sel.value;
+                sel.innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                if (currentVal && customers.some(c => c.id == currentVal)) sel.value = currentVal;
+            });
+        }
+
+        document.getElementById('addCustomerOnFlySvc').addEventListener('click', function() {
+            qpSvc.innerHTML = `
+                <h3 style="margin-bottom:16px;">Add Customer</h3>
+                <div class="form-grid">
+                    <div class="form-group"><label>Name *</label><input id="qcName" required></div>
+                    <div class="form-group"><label>GSTIN</label><input id="qcGstin"></div>
+                    <div class="form-group"><label>State</label><input id="qcState"></div>
+                    <div class="form-group"><label>Phone</label><input id="qcPhone"></div>
+                    <div class="form-group full"><label>Address</label><textarea id="qcAddress" rows="2"></textarea></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                    <button class="btn btn-primary" id="saveQuickCustomerSvc">Save Customer</button>
+                    <button class="btn btn-secondary" id="cancelQuickAddSvc">Cancel</button>
+                </div>
+            `;
+            qpSvc.style.display = 'block';
+            document.getElementById('saveQuickCustomerSvc').addEventListener('click', async function() {
+                const name = document.getElementById('qcName').value.trim();
+                if (!name) { showToast('Customer name is required', 'error'); return; }
+                const obj = {
+                    name: name,
+                    gstin: document.getElementById('qcGstin').value.trim(),
+                    state: document.getElementById('qcState').value.trim(),
+                    phone: document.getElementById('qcPhone').value.trim(),
+                    address: document.getElementById('qcAddress').value.trim()
+                };
+                try {
+                    const newId = await dbAdd('customers', obj);
+                    obj.id = newId;
+                    customers.push(obj);
+                    const sel = document.getElementById('serviceCustomer');
+                    sel.innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                    sel.value = newId;
+                    qpSvc.style.display = 'none';
+                    showToast('Customer added', 'success');
+                } catch (err) { showToast('Error saving customer', 'error'); }
+            });
+            document.getElementById('cancelQuickAddSvc').addEventListener('click', function() {
+                qpSvc.style.display = 'none';
+            });
+        });
+
+        document.getElementById('addProductOnFlySvc').addEventListener('click', function() {
+            qpSvc.innerHTML = `
+                <h3 style="margin-bottom:16px;">Add Inventory Item</h3>
+                <div class="form-grid">
+                    <div class="form-group"><label>Type</label><select id="qpType">${PRODUCT_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Item Name *</label><input id="qpName" required></div>
+                    <div class="form-group"><label>SKU</label><input id="qpSku"></div>
+                    <div class="form-group"><label>Selling Price (₹)</label><input type="number" step="0.01" id="qpPrice" value="0"></div>
+                    <div class="form-group"><label>GST %</label><input type="number" step="0.1" id="qpGst" value="18"></div>
+                    <div class="form-group"><label>Stock Quantity</label><input type="number" id="qpStock" value="0"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                    <button class="btn btn-primary" id="saveQuickProductSvc">Save Item</button>
+                    <button class="btn btn-secondary" id="cancelQuickAddSvc">Cancel</button>
+                </div>
+            `;
+            qpSvc.style.display = 'block';
+            document.getElementById('saveQuickProductSvc').addEventListener('click', async function() {
+                const name = document.getElementById('qpName').value.trim();
+                if (!name) { showToast('Item name is required', 'error'); return; }
+                const obj = {
+                    type: document.getElementById('qpType').value,
+                    sku: document.getElementById('qpSku').value.trim(),
+                    name: name,
+                    sellingPrice: parseFloat(document.getElementById('qpPrice').value) || 0,
+                    gstRate: parseFloat(document.getElementById('qpGst').value) || 18,
+                    stockQuantity: parseInt(document.getElementById('qpStock').value) || 0,
+                    purchasePrice: 0, reorderLevel: 0, status: 'In Stock',
+                    brand: '', modelNumber: '', category: '', fuelType: '', capacityKva: 0,
+                    outputVoltage: '', phase: '', frequency: '', engineModel: '',
+                    alternatorModel: '', serialNumber: '', manufacturingYear: null,
+                    warrantyPeriod: null, supplierId: null
+                };
+                try {
+                    const newId = await dbAdd('products', obj);
+                    obj.id = newId;
+                    products.push(obj);
+                    // Refresh spare parts if type is Spare Part
+                    if (obj.type === 'Spare Part') {
+                        spareParts.push(obj);
+                        const curFilter = document.getElementById('sparePartsSearch').value;
+                        renderSparePartDropdown(curFilter);
+                    }
+                    qpSvc.style.display = 'none';
+                    showToast('Item added', 'success');
+                } catch (err) { showToast('Error saving item', 'error'); }
+            });
+            document.getElementById('cancelQuickAddSvc').addEventListener('click', function() {
+                qpSvc.style.display = 'none';
+            });
+        });
 
         document.getElementById('serviceForm').addEventListener('submit', async e => {
             e.preventDefault();
