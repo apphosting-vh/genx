@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.2.0';
+    const APP_VERSION = '1.3.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
@@ -5747,7 +5747,9 @@
                                 <div style="margin-top:6px;"><button type="button" class="btn btn-primary btn-sm" id="addProductOnFlySvc">${iconSvg('plus')} Add New Item</button></div>
                             </div>
                             <div class="form-group"><label>Next Service Due Date</label><input type="date" id="serviceNextDue" value="${isEdit ? serviceData.nextServiceDueDate : ''}"></div>
-                            <div class="form-group"><label>Service Cost (₹)</label><input type="number" step="0.01" id="serviceCost" value="${isEdit ? serviceData.serviceCost || 0 : 0}"></div>
+                            <div class="form-group"><label>Spare Part Cost (₹)</label><input type="number" step="0.01" id="sparePartCost" value="${isEdit && serviceData.sparePartCost ? serviceData.sparePartCost : 0}"></div>
+                            <div class="form-group"><label>Service Charge (₹)</label><input type="number" step="0.01" id="serviceCost" value="${isEdit ? serviceData.serviceCost || 0 : 0}"></div>
+                            <div class="form-group"><label>Total Cost (₹)</label><input type="number" step="0.01" id="totalCost" style="font-size:1.3rem;font-weight:800;color:var(--primary);background:#f0f4ff;border:2px solid var(--primary);padding:10px 12px;" value="${isEdit && serviceData.totalCost ? serviceData.totalCost : 0}"></div>
                         </div>
                         <button type="submit" class="btn btn-primary" style="margin-top:12px;">${isEdit ? 'Update' : 'Save'}</button>
                     </form>
@@ -5803,12 +5805,33 @@
                         if (idx !== -1) sparePartsSelection.splice(idx, 1);
                     }
                     renderSparePartTags();
+                    updateServiceCosts();
                 });
             });
         }
 
         renderSparePartTags();
         renderSparePartDropdown('');
+
+        function updateServiceCosts() {
+            const sparePartCost = sparePartsSelection.reduce((sum, sp) => {
+                const p = products.find(pr => pr.id === sp.productId);
+                return sum + (p ? (parseFloat(p.sellingPrice) || 0) : 0);
+            }, 0);
+            document.getElementById('sparePartCost').value = sparePartCost.toFixed(2);
+            recalcTotal();
+        }
+        function recalcTotal() {
+            const spc = parseFloat(document.getElementById('sparePartCost').value) || 0;
+            const sc = parseFloat(document.getElementById('serviceCost').value) || 0;
+            document.getElementById('totalCost').value = (spc + sc).toFixed(2);
+        }
+        // Initial calculation for edit mode
+        updateServiceCosts();
+        document.getElementById('serviceCost').addEventListener('input', recalcTotal);
+        document.getElementById('serviceCost').addEventListener('change', recalcTotal);
+        document.getElementById('sparePartCost').addEventListener('input', recalcTotal);
+        document.getElementById('sparePartCost').addEventListener('change', recalcTotal);
 
         const sparePartsTrigger = document.getElementById('sparePartsTrigger');
         const sparePartsDropdown = document.getElementById('sparePartsDropdown');
@@ -5850,6 +5873,7 @@
                 if (idx !== -1) sparePartsSelection.splice(idx, 1);
                 renderSparePartTags();
                 renderSparePartDropdown(sparePartsSearch.value);
+                updateServiceCosts();
             }
         });
 
@@ -5996,7 +6020,9 @@
                     partsReplaced: partsReplaced,
                     partsConsumed: sparePartsSelection.length ? sparePartsSelection : null,
                     nextServiceDueDate: document.getElementById('serviceNextDue').value,
+                    sparePartCost: parseFloat(document.getElementById('sparePartCost').value) || 0,
                     serviceCost: parseFloat(document.getElementById('serviceCost').value) || 0,
+                    totalCost: parseFloat(document.getElementById('totalCost').value) || 0,
                 };
                 if (isEdit) {
                     obj.id = serviceData.id;
