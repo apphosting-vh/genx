@@ -365,8 +365,14 @@
             const remoteVersion = data.version;
             if (!remoteVersion) return;
             if (isNewerVersion(remoteVersion, APP_VERSION)) {
+                if (localStorage.getItem('genfin_updating_to') === remoteVersion) {
+                    console.log('Update to ' + remoteVersion + ' already attempted — skipping to avoid loop.');
+                    return;
+                }
+                localStorage.setItem('genfin_updating_to', remoteVersion);
                 performAppUpdate();
             } else {
+                localStorage.removeItem('genfin_updating_to');
                 console.log('App is up to date (v' + APP_VERSION + ')');
             }
         } catch (err) {
@@ -437,13 +443,12 @@
             }
             if ('caches' in window) {
                 const cacheNames = await caches.keys();
-                const appCaches = cacheNames.filter(name => name.startsWith('genfin-'));
-                await Promise.all(appCaches.map(name => caches.delete(name)));
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
             }
             localStorage.removeItem('genfin_last_success');
             localStorage.removeItem('genfin_last_attempt');
             localStorage.removeItem('genfin_last_error');
-            window.location.reload();
+            window.location.href = window.location.href.split('?')[0].split('#')[0] + '?v=' + Date.now();
         } catch (err) {
             console.error('Update failed:', err);
             showToast('Update failed: ' + err.message, 'error');
