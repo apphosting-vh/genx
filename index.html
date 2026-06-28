@@ -1199,8 +1199,9 @@
     <div id="modalContainer"></div>
     <div class="print-area" id="printArea"></div>
 
-    <!-- ─── app-core.js ─────────────────────────────────────────────────── -->
-    <script src="app-core.js">
+    <!-- ─── app-core.js (cache-busted) ──────────────────────────────────── -->
+    <script>
+        document.write('<script src="app-core.js?v=' + Date.now() + '"><\/script>');
     </script>
 
     <!-- ─── Page Color System ───────────────────────────────────────────── -->
