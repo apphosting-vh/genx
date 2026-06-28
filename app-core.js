@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '2.2.0';
+    const APP_VERSION = '2.3.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
@@ -2372,6 +2372,7 @@
                 case 'service-warranty': await renderServiceWarranty(); break;
                 case 'gst-summary': await renderGSTSummary(); break;
                 case 'notepad': await renderNotepad(); break;
+                case 'about': renderAbout(); break;
                 default: await renderInvoices();
             }
         } catch (err) {
@@ -6749,6 +6750,44 @@
 
         // If no notes, show empty editor
         if (!notes.length) clearEditor();
+    }
+
+    function renderAbout() {
+        const features = [
+            'Invoice Management — create, edit, view, export (PDF/Excel)',
+            'Purchase Order Management — create, edit, view, export (PDF/Excel)',
+            'Expense Tracking — record and filter expenses',
+            'Customer & Supplier Management — add, edit, delete contacts',
+            'Inventory Management — track stock, SKU, pricing, GST rates',
+            'Service & Warranty Tracking — log service records with spare parts multi-select',
+            'GST Summary — auto-calculated GST reports with CSV export',
+            'Financial Reports — profit trends, receivables aging, expense breakdown, charts',
+            'Google Drive Backup — auto-backup, restore, download latest backup',
+            'Local File Sync — export/import full data as JSON',
+            'Notepad — built-in notes editor',
+            'Offline-capable PWA with service worker caching',
+            'Real-time sync indicators and online/offline status'
+        ];
+        const html = `
+            <div class="page-header"><h1 class="page-title">About GenFin</h1></div>
+            <div class="card" style="max-width:720px;">
+                <h3 style="margin-bottom:12px;">GenFin — Business Manager</h3>
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Version</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">${APP_VERSION}</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Technology</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">Vanilla JavaScript (ES2020+), HTML5, CSS3 — no frameworks</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Data Storage</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">IndexedDB (client-side, no server) — all data stays in-browser</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Offline Support</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">Service worker caching for offline operation (PWA)</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Cloud Backup</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">Google Drive API (OAuth 2.0) — optional encrypted backups</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; border-bottom:1px solid var(--border); vertical-align:top;">Export Formats</td><td style="padding:8px 12px; border-bottom:1px solid var(--border);">PDF, Excel (XLSX), CSV, JSON</td></tr>
+                    <tr><td style="padding:8px 12px; font-weight:600; vertical-align:top;">Libraries</td><td style="padding:8px 12px;">SheetJS (xlsx), Chart.js, Google Identity Services, Google API Client</td></tr>
+                </table>
+                <h4 style="margin-top:20px; margin-bottom:8px;">Available Features</h4>
+                <ul style="padding-left:20px; line-height:1.8;">
+                    ${features.map(f => `<li>${f}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+        mainContent.innerHTML = html;
     }
 
     // ---- Start app ----
