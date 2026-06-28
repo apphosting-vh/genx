@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.4.0';
+    const APP_VERSION = '2.0.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 

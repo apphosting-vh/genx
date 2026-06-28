@@ -1,5 +1,5 @@
 // sw.js - GenFin Production Offline Service Worker
-const CACHE_VERSION = 'v1.4';
+const CACHE_VERSION = 'v2.0';
 const CACHE_NAME = `genfin-${CACHE_VERSION}`;
 
 // Same-origin assets to cache on install
