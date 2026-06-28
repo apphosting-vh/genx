@@ -79,7 +79,7 @@
     injectIconStyles();
 
     // ---------- App Version ----------
-    const APP_VERSION = '1.3.0';
+    const APP_VERSION = '1.4.0';
     const VERSION_CHECK_INTERVAL = 60 * 60 * 1000;
     let versionCheckTimer = null;
 
@@ -365,7 +365,7 @@
             const remoteVersion = data.version;
             if (!remoteVersion) return;
             if (isNewerVersion(remoteVersion, APP_VERSION)) {
-                showUpdateToast(remoteVersion);
+                performAppUpdate();
             } else {
                 console.log('App is up to date (v' + APP_VERSION + ')');
             }
